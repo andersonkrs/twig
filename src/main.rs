@@ -57,15 +57,15 @@ enum Commands {
     },
 
     /// Git worktree operations
-    #[command(alias = "wt")]
-    Worktree {
+    #[command(alias = "t")]
+    Trees {
         #[command(subcommand)]
-        action: WorktreeCommands,
+        action: TreesCommands,
     },
 }
 
 #[derive(Subcommand)]
-enum WorktreeCommands {
+enum TreesCommands {
     /// Create a new worktree and start a session
     #[command(alias = "c")]
     Create {
@@ -102,10 +102,10 @@ fn main() -> Result<()> {
         Commands::Edit { project } => cli::edit::run(project),
         Commands::Delete { project } => cli::delete::run(project),
         Commands::Stop { project } => cli::stop::run(project),
-        Commands::Worktree { action } => match action {
-            WorktreeCommands::Create { project, branch } => cli::worktree::create(project, branch),
-            WorktreeCommands::List { project } => cli::worktree::list(project),
-            WorktreeCommands::Delete { project, branch } => cli::worktree::delete(project, branch),
+        Commands::Trees { action } => match action {
+            TreesCommands::Create { project, branch } => cli::worktree::create(project, branch),
+            TreesCommands::List { project } => cli::worktree::list(project),
+            TreesCommands::Delete { project, branch } => cli::worktree::delete(project, branch),
         },
     }
 }
