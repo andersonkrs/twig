@@ -1,0 +1,7 @@
+[tools]
+rust = "latest"
+gum = "latest"
+lefthook = "latest"
+
+[hooks.postinstall]
+run = "lefthook install"

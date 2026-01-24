@@ -1,0 +1,23 @@
+pre-commit:
+  parallel: false
+  commands:
+    fmt:
+      glob: "*.rs"
+      staged_files: true
+      run: cargo fmt -- --check {staged_files}
+      fail_text: "Run 'cargo fmt' to fix formatting"
+    clippy:
+      glob: "*.rs"
+      staged_files: true
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      fail_text: "Fix clippy warnings before committing"
+
+pre-push:
+  parallel: true
+  commands:
+    test:
+      run: cargo test
+      fail_text: "Tests failed"
+    build:
+      run: cargo build --release
+      fail_text: "Release build failed"
