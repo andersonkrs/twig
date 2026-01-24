@@ -68,9 +68,9 @@ Aliases: `ls` for `list`, `s` for `start`, `n` for `new`, `e` for `edit`, `rm` f
 Location: `~/.config/twig/config.yml`
 
 ```yaml
-# Base path for worktrees (default: ~/Work/twig)
+# Base path for worktrees (default: ~/Work/.trees)
 # Worktrees are created at: {worktree_base}/{project}/{branch}
-worktree_base: ~/Work/twig
+worktree_base: ~/Work/.trees
 
 # Projects directory (default: ~/.config/twig/projects)
 projects_dir: ~/.config/twig/projects
@@ -191,7 +191,7 @@ When you run `twig worktree create <project> <branch>`:
 
 Session naming: `myproject__feature-auth` (double underscore separator)
 
-Worktree path: `~/Work/twig/myproject/feature-auth`
+Worktree path: `~/Work/.trees/myproject/feature-auth`
 
 When you run `twig worktree delete <project> <branch>`:
 

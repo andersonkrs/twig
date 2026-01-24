@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct GlobalConfig {
-    /// Base path for worktrees (e.g., ~/Work/twig)
+    /// Base path for worktrees (e.g., ~/Work/.trees)
     #[serde(default = "default_worktree_base")]
     pub worktree_base: String,
 
@@ -24,7 +24,7 @@ impl Default for GlobalConfig {
 }
 
 fn default_worktree_base() -> String {
-    "~/Work/twig".to_string()
+    "~/Work/.trees".to_string()
 }
 
 impl GlobalConfig {
