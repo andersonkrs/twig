@@ -199,12 +199,16 @@ impl PickerApp {
 
         // Use the configured height, but cap at terminal height
         let height = self.height.min(area.height);
+        let render_area = Rect::new(0, 0, area.width, height);
+
+        // Clear the entire area first
+        frame.render_widget(ClearWidget, render_area);
 
         // Split into search input (1 line) and list
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(Rect::new(0, 0, area.width, height));
+            .split(render_area);
 
         // Search input (single line, no border)
         let input_text = if self.query.is_empty() {
@@ -493,6 +497,10 @@ impl ConfirmApp {
 
     fn render_inline(&self, frame: &mut Frame) {
         let area = frame.size();
+        let render_area = Rect::new(0, 0, area.width, 1);
+
+        // Clear the line first
+        frame.render_widget(ClearWidget, render_area);
 
         // Single line: message + buttons
         let yes_style = if self.selected == ConfirmResult::Yes {
@@ -519,7 +527,7 @@ impl ConfirmApp {
         ]);
 
         let paragraph = Paragraph::new(line);
-        frame.render_widget(paragraph, Rect::new(0, 0, area.width, 1));
+        frame.render_widget(paragraph, render_area);
     }
 
     fn render_window(&self, frame: &mut Frame) {
@@ -713,6 +721,10 @@ impl InputApp {
 
     fn render_inline(&self, frame: &mut Frame) {
         let area = frame.size();
+        let render_area = Rect::new(0, 0, area.width, 1);
+
+        // Clear the line first
+        frame.render_widget(ClearWidget, render_area);
 
         // Single line: title + input
         let input_text = if self.value.is_empty() {
@@ -729,7 +741,7 @@ impl InputApp {
         ]);
 
         let paragraph = Paragraph::new(line);
-        frame.render_widget(paragraph, Rect::new(0, 0, area.width, 1));
+        frame.render_widget(paragraph, render_area);
     }
 
     fn render_window(&self, frame: &mut Frame) {
