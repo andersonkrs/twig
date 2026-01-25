@@ -155,7 +155,7 @@ pub fn delete(project_name: Option<String>, branch: Option<String>) -> Result<()
     let session_name = project.worktree_session_name(&branch_name);
     if tmux::session_exists(&session_name)? {
         println!("Stopping session '{}'...", session_name);
-        tmux::kill_session(&session_name)?;
+        tmux::safe_kill_session(&session_name)?;
     }
 
     // Delete the worktree
@@ -207,7 +207,7 @@ pub fn merge(project_name: Option<String>, branch: Option<String>) -> Result<()>
         let session_name = project.worktree_session_name(&branch_name);
         if tmux::session_exists(&session_name)? {
             println!("Stopping session '{}'...", session_name);
-            tmux::kill_session(&session_name)?;
+            tmux::safe_kill_session(&session_name)?;
         }
 
         // Delete the worktree (also deletes the local branch)

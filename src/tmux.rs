@@ -46,6 +46,33 @@ pub fn inside_tmux() -> bool {
     std::env::var("TMUX").is_ok()
 }
 
+/// Get the current tmux session name (if inside tmux)
+pub fn current_session_name() -> Option<String> {
+    if !inside_tmux() {
+        return None;
+    }
+
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// Detach from current tmux session
+pub fn detach() -> Result<()> {
+    Command::new("tmux")
+        .arg("detach-client")
+        .status()
+        .context("Failed to detach from tmux")?;
+    Ok(())
+}
+
 /// Kill a tmux session
 pub fn kill_session(name: &str) -> Result<()> {
     let status = Command::new("tmux")
@@ -58,6 +85,27 @@ pub fn kill_session(name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Safely kill a session, switching away first if we're inside it
+pub fn safe_kill_session(name: &str) -> Result<()> {
+    if let Some(current) = current_session_name() {
+        if current == name {
+            // We're inside the session we want to kill
+            // Try to switch to another session first
+            let sessions = list_sessions()?;
+            let other_session = sessions.iter().find(|s| *s != name);
+
+            if let Some(other) = other_session {
+                switch_client(other)?;
+            } else {
+                // No other session, detach first
+                detach()?;
+            }
+        }
+    }
+
+    kill_session(name)
 }
 
 /// List all tmux sessions
