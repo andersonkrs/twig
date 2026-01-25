@@ -1,3 +1,6 @@
+[env]
+_.file = { path = ".env" }
+
 [tools]
 rust = "latest"
 gum = "latest"

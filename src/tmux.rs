@@ -84,6 +84,8 @@ pub struct SessionBuilder {
     session_name: String,
     root: String,
     windows: Vec<Window>,
+    project_name: String,
+    worktree_branch: Option<String>,
 }
 
 impl SessionBuilder {
@@ -92,6 +94,8 @@ impl SessionBuilder {
             session_name: project.name.clone(),
             root: project.root.clone(),
             windows: project.windows.clone(),
+            project_name: project.name.clone(),
+            worktree_branch: None,
         }
     }
 
@@ -102,6 +106,11 @@ impl SessionBuilder {
 
     pub fn with_root(mut self, root: String) -> Self {
         self.root = root;
+        self
+    }
+
+    pub fn with_worktree(mut self, branch: String) -> Self {
+        self.worktree_branch = Some(branch);
         self
     }
 
@@ -128,6 +137,31 @@ impl SessionBuilder {
             ])
             .status()
             .context("Failed to create tmux session")?;
+
+        // Set twig environment variables for the session
+        Command::new("tmux")
+            .args([
+                "set-environment",
+                "-t",
+                &self.session_name,
+                "_TWIG_PROJECT",
+                &self.project_name,
+            ])
+            .status()
+            .context("Failed to set _TWIG_PROJECT")?;
+
+        if let Some(branch) = &self.worktree_branch {
+            Command::new("tmux")
+                .args([
+                    "set-environment",
+                    "-t",
+                    &self.session_name,
+                    "_TWIG_WORKTREE",
+                    branch,
+                ])
+                .status()
+                .context("Failed to set _TWIG_WORKTREE")?;
+        }
 
         // Get the base index for windows
         let base_index = get_base_index();

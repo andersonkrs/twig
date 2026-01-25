@@ -51,9 +51,10 @@ enum Commands {
     },
 
     /// Stop (kill) a tmux session
+    #[command(alias = "kill")]
     Stop {
         /// Session name
-        project: Option<String>,
+        session: Option<String>,
     },
 
     /// Git worktree operations
@@ -101,7 +102,7 @@ fn main() -> Result<()> {
         Commands::New { name } => cli::new::run(name),
         Commands::Edit { project } => cli::edit::run(project),
         Commands::Delete { project } => cli::delete::run(project),
-        Commands::Stop { project } => cli::stop::run(project),
+        Commands::Stop { session } => cli::kill::run(session),
         Commands::Tree { action } => match action {
             TreeCommands::Create { project, branch } => cli::worktree::create(project, branch),
             TreeCommands::List { project } => cli::worktree::list(project),
