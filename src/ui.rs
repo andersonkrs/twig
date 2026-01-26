@@ -1,14 +1,13 @@
 //! Ratatui-based UI components for interactive prompts.
 
-use std::io::{stdout, IsTerminal, Stdout, Write};
+use std::io::{stdout, IsTerminal, Stdout};
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::cursor::{MoveToColumn, MoveUp};
+
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
-    self, disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -375,33 +374,19 @@ fn picker_with_options(
         stdout().execute(LeaveAlternateScreen)?;
         res
     } else {
-        // Inline mode: print newlines to make space, then render
-        let mut stdout = stdout();
-
-        // Make space for the picker
-        for _ in 0..height {
-            writeln!(stdout)?;
-        }
-        // Move cursor back up
-        stdout.execute(MoveUp(height))?;
-        stdout.execute(MoveToColumn(0))?;
-
+        // Inline mode: render at current cursor position
         let mut terminal = Terminal::with_options(
-            CrosstermBackend::new(stdout),
+            CrosstermBackend::new(stdout()),
             TerminalOptions {
-                viewport: Viewport::Fixed(Rect::new(0, 0, terminal::size()?.0, height)),
+                viewport: Viewport::Inline(height),
             },
         )?;
 
         let res = run_picker_loop(&mut terminal, &mut app, false);
 
-        // Clean up: clear the picker area
+        // Clean up: clear the inline area
         disable_raw_mode()?;
-        let mut out = std::io::stdout();
-        // Clear from cursor to end of screen (covers all picker lines)
-        out.execute(MoveToColumn(0))?;
-        out.execute(Clear(ClearType::FromCursorDown))?;
-        out.flush()?;
+        terminal.clear()?;
 
         res
     };
@@ -617,27 +602,19 @@ fn confirm_with_options(message: &str, window_mode: bool) -> Result<bool> {
         stdout().execute(LeaveAlternateScreen)?;
         res
     } else {
-        // Inline mode
-        let mut stdout = stdout();
-        writeln!(stdout)?;
-        stdout.execute(MoveUp(1))?;
-        stdout.execute(MoveToColumn(0))?;
-
+        // Inline mode: render at current cursor position
         let mut terminal = Terminal::with_options(
-            CrosstermBackend::new(stdout),
+            CrosstermBackend::new(stdout()),
             TerminalOptions {
-                viewport: Viewport::Fixed(Rect::new(0, 0, terminal::size()?.0, 1)),
+                viewport: Viewport::Inline(1),
             },
         )?;
 
         let res = run_confirm_loop(&mut terminal, &mut app, false);
 
-        // Clean up: clear the line
+        // Clean up: clear the inline area
         disable_raw_mode()?;
-        let mut out = std::io::stdout();
-        out.execute(MoveToColumn(0))?;
-        out.execute(Clear(ClearType::FromCursorDown))?;
-        out.flush()?;
+        terminal.clear()?;
 
         res
     };
@@ -817,27 +794,19 @@ fn input_with_options(
         stdout().execute(LeaveAlternateScreen)?;
         res
     } else {
-        // Inline mode
-        let mut stdout = stdout();
-        writeln!(stdout)?;
-        stdout.execute(MoveUp(1))?;
-        stdout.execute(MoveToColumn(0))?;
-
+        // Inline mode: render at current cursor position
         let mut terminal = Terminal::with_options(
-            CrosstermBackend::new(stdout),
+            CrosstermBackend::new(stdout()),
             TerminalOptions {
-                viewport: Viewport::Fixed(Rect::new(0, 0, terminal::size()?.0, 1)),
+                viewport: Viewport::Inline(1),
             },
         )?;
 
         let res = run_input_loop(&mut terminal, &mut app, false);
 
-        // Clean up: clear the line
+        // Clean up: clear the inline area
         disable_raw_mode()?;
-        let mut out = std::io::stdout();
-        out.execute(MoveToColumn(0))?;
-        out.execute(Clear(ClearType::FromCursorDown))?;
-        out.flush()?;
+        terminal.clear()?;
 
         res
     };
