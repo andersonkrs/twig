@@ -85,11 +85,10 @@ struct PickerApp {
     query: String,
     placeholder: String,
     matcher: SkimMatcherV2,
-    height: u16,
 }
 
 impl PickerApp {
-    fn new(items: Vec<PickerItem>, placeholder: String, height: u16) -> Self {
+    fn new(items: Vec<PickerItem>, placeholder: String) -> Self {
         let filtered_indices: Vec<usize> = (0..items.len()).collect();
         let mut list_state = ListState::default();
         if !items.is_empty() {
@@ -103,7 +102,6 @@ impl PickerApp {
             query: String::new(),
             placeholder,
             matcher: SkimMatcherV2::default(),
-            height,
         }
     }
 
@@ -196,18 +194,11 @@ impl PickerApp {
     fn render_inline(&mut self, frame: &mut Frame) {
         let area = frame.size();
 
-        // Use the configured height, but cap at terminal height
-        let height = self.height.min(area.height);
-        let render_area = Rect::new(0, 0, area.width, height);
-
-        // Clear the entire area first
-        frame.render_widget(ClearWidget, render_area);
-
         // Split into search input (1 line) and list
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(1)])
-            .split(render_area);
+            .split(area);
 
         // Search input (single line, no border)
         let input_text = if self.query.is_empty() {
@@ -362,7 +353,7 @@ fn picker_with_options(
     let (_, term_height) = terminal::size()?;
     let height = PICKER_HEIGHT.min(term_height.saturating_sub(2));
 
-    let mut app = PickerApp::new(items, placeholder.to_string(), height);
+    let mut app = PickerApp::new(items, placeholder.to_string());
 
     enable_raw_mode()?;
 
@@ -479,10 +470,6 @@ impl ConfirmApp {
 
     fn render_inline(&self, frame: &mut Frame) {
         let area = frame.size();
-        let render_area = Rect::new(0, 0, area.width, 1);
-
-        // Clear the line first
-        frame.render_widget(ClearWidget, render_area);
 
         // Single line: message + buttons
         let yes_style = if self.selected == ConfirmResult::Yes {
@@ -509,7 +496,7 @@ impl ConfirmApp {
         ]);
 
         let paragraph = Paragraph::new(line);
-        frame.render_widget(paragraph, render_area);
+        frame.render_widget(paragraph, area);
     }
 
     fn render_window(&self, frame: &mut Frame) {
@@ -696,10 +683,6 @@ impl InputApp {
 
     fn render_inline(&self, frame: &mut Frame) {
         let area = frame.size();
-        let render_area = Rect::new(0, 0, area.width, 1);
-
-        // Clear the line first
-        frame.render_widget(ClearWidget, render_area);
 
         // Single line: title + input
         let input_text = if self.value.is_empty() {
@@ -716,7 +699,7 @@ impl InputApp {
         ]);
 
         let paragraph = Paragraph::new(line);
-        frame.render_widget(paragraph, render_area);
+        frame.render_widget(paragraph, area);
     }
 
     fn render_window(&self, frame: &mut Frame) {
