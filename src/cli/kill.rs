@@ -1,10 +1,11 @@
 //! Kill a tmux session with Ratatui confirmation for worktrees.
 
-use std::io::{stdout, IsTerminal};
+use std::io::{stdout, IsTerminal, Write};
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::style::{Color as TermColor, Print, ResetColor, SetForegroundColor};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -18,8 +19,13 @@ use crate::git;
 use crate::tmux;
 
 pub fn run(session_name: Option<String>) -> Result<()> {
-    // Use tree view to select session
-    let action = tree_view::run_for_kill(session_name)?;
+    // If project name given directly, use inline confirmation
+    if let Some(ref name) = session_name {
+        return run_with_project(name);
+    }
+
+    // No args: use tree view to select session
+    let action = tree_view::run_for_kill(None)?;
 
     let (project_name, branch) = match action {
         Some(SelectedAction::KillProject(name)) => (name, None),
@@ -27,9 +33,88 @@ pub fn run(session_name: Option<String>) -> Result<()> {
         _ => return Ok(()), // User quit or unexpected action
     };
 
+    kill_session_with_confirmation(&project_name, branch)
+}
+
+/// Kill a specific project session with inline confirmation
+fn run_with_project(name: &str) -> Result<()> {
+    // Check if session exists
+    if !tmux::session_exists(name)? {
+        anyhow::bail!("Session '{}' is not running", name);
+    }
+
+    // Show inline confirmation
+    if !inline_confirm(name)? {
+        println!("Cancelled.");
+        return Ok(());
+    }
+
+    // Kill the session
+    tmux::kill_session(name)?;
+    print_success(&format!("Killed session: {}", name));
+
+    Ok(())
+}
+
+/// Print colored inline confirmation prompt and get y/n response
+fn inline_confirm(session_name: &str) -> Result<bool> {
+    if !stdout().is_terminal() {
+        return Ok(true);
+    }
+
+    let mut stdout = stdout();
+
+    // Print: "Kill session 'name'? [y/N] "
+    stdout.execute(SetForegroundColor(TermColor::Yellow))?;
+    stdout.execute(Print("Kill session "))?;
+    stdout.execute(SetForegroundColor(TermColor::Cyan))?;
+    stdout.execute(Print(format!("'{}'", session_name)))?;
+    stdout.execute(SetForegroundColor(TermColor::Yellow))?;
+    stdout.execute(Print("? "))?;
+    stdout.execute(SetForegroundColor(TermColor::DarkGrey))?;
+    stdout.execute(Print("[y/N] "))?;
+    stdout.execute(ResetColor)?;
+    stdout.flush()?;
+
+    // Read single key
+    enable_raw_mode()?;
+    let result = loop {
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => break Ok(true),
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => {
+                            break Ok(false)
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            break Ok(false)
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    };
+    disable_raw_mode()?;
+    println!(); // Newline after response
+
+    result
+}
+
+/// Print success message in green
+fn print_success(msg: &str) {
+    let mut stdout = stdout();
+    let _ = stdout.execute(SetForegroundColor(TermColor::Green));
+    let _ = stdout.execute(Print(msg));
+    let _ = stdout.execute(ResetColor);
+    println!();
+}
+
+fn kill_session_with_confirmation(project_name: &str, branch: Option<String>) -> Result<()> {
     let session_name = match &branch {
         Some(b) => format!("{}__{}", project_name, b),
-        None => project_name.clone(),
+        None => project_name.to_string(),
     };
 
     // Check if session exists
@@ -68,7 +153,7 @@ pub fn run(session_name: Option<String>) -> Result<()> {
     // Delete worktree if confirmed
     if delete_worktree {
         if let Some(ref b) = branch {
-            let project = Project::load(&project_name)?;
+            let project = Project::load(project_name)?;
             git::delete_worktree(&project, b)?;
             println!("Deleted worktree: {}", b);
         }
