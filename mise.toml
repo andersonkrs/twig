@@ -3,7 +3,6 @@ _.file = { path = ".env" }
 
 [tools]
 rust = "latest"
-gum = "latest"
 lefthook = "latest"
 
 [hooks.postinstall]
