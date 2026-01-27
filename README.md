@@ -2,13 +2,12 @@
 
 A tmux session manager with git worktree support, inspired by [tmuxinator](https://github.com/tmuxinator/tmuxinator).
 
-Built to scratch my own itch. Uses [Charmbracelet](https://charm.sh/) tools like [Gum](https://github.com/charmbracelet/gum) for glamorous terminal interactions.
+Built to scratch my own itch. Terminal UI built with [Ratatui](https://ratatui.rs/).
 
 ## Requirements
 
 - `tmux`
 - `git`
-- `gum` - [Charmbracelet Gum](https://github.com/charmbracelet/gum)
 
 ## Installation
 
@@ -17,10 +16,10 @@ We recommend using [mise](https://mise.jdx.dev/) to install.
 ### Via mise
 
 ```bash
-mise use -g cargo:https://github.com/andersonkrs/twig gum
+mise use -g cargo:https://github.com/andersonkrs/twig
 ```
 
-This compiles twig from source and installs gum globally.
+This compiles twig from source and installs it globally.
 
 ### From source (for development)
 
@@ -28,7 +27,7 @@ This compiles twig from source and installs gum globally.
 git clone https://github.com/andersonkrs/twig.git ~/Work/twig
 cd ~/Work/twig
 
-# Install all tools (rust, gum, lefthook) + git hooks
+# Install all tools (rust, lefthook) + git hooks
 mise install
 
 # Build
