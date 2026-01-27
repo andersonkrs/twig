@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::cli::kill;
 use crate::cli::tree_view::{self, SelectedAction};
 use crate::config::Project;
 use crate::git;
@@ -70,9 +71,10 @@ pub fn list(project_name: Option<String>) -> Result<()> {
         Some(SelectedAction::StartWorktree { project, branch }) => {
             start_worktree_session(&project, &branch)
         }
-        Some(SelectedAction::KillProject(_) | SelectedAction::KillWorktree { .. }) => {
-            // Kill actions not expected from tree list, ignore
-            Ok(())
+        Some(SelectedAction::KillProject(name)) => kill::run(Some(name)),
+        Some(SelectedAction::KillWorktree { project, branch }) => {
+            let session_name = format!("{}__{}", project, branch);
+            kill::run(Some(session_name))
         }
         None => Ok(()), // User quit
     }

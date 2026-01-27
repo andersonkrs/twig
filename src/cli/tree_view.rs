@@ -136,7 +136,7 @@ impl<'a> TreeViewApp<'a> {
 
     fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<HandleResult> {
         match code {
-            KeyCode::Char('q') if modifiers.is_empty() && self.query.is_empty() => {
+            KeyCode::Char('w') if modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(HandleResult::Quit);
             }
             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
@@ -151,23 +151,40 @@ impl<'a> TreeViewApp<'a> {
                 }
             }
 
+            // Kill session with Ctrl+K
+            KeyCode::Char('k') if modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(action) = self.get_selected_action() {
+                    // Convert to kill action regardless of mode
+                    let kill_action = match action {
+                        SelectedAction::StartProject(name) | SelectedAction::KillProject(name) => {
+                            SelectedAction::KillProject(name)
+                        }
+                        SelectedAction::StartWorktree { project, branch }
+                        | SelectedAction::KillWorktree { project, branch } => {
+                            SelectedAction::KillWorktree { project, branch }
+                        }
+                    };
+                    return Some(HandleResult::Action(kill_action));
+                }
+            }
+
             // Navigation
-            KeyCode::Up | KeyCode::Char('k') if self.query.is_empty() => {
+            KeyCode::Up => {
                 self.tree_state.key_up();
             }
             KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.tree_state.key_up();
             }
-            KeyCode::Down | KeyCode::Char('j') if self.query.is_empty() => {
+            KeyCode::Down => {
                 self.tree_state.key_down();
             }
             KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.tree_state.key_down();
             }
-            KeyCode::Left | KeyCode::Char('h') if self.query.is_empty() => {
+            KeyCode::Left if self.query.is_empty() => {
                 self.tree_state.key_left();
             }
-            KeyCode::Right | KeyCode::Char('l') if self.query.is_empty() => {
+            KeyCode::Right if self.query.is_empty() => {
                 self.tree_state.key_right();
             }
 
@@ -326,7 +343,10 @@ impl<'a> TreeViewApp<'a> {
                 Span::styled("Enter", Style::default().fg(Color::LightCyan)),
                 Span::styled(action_text, Style::default().fg(Color::Gray)),
                 Span::styled("\u{2502} ", Style::default().fg(separator_color)),
-                Span::styled("q", Style::default().fg(Color::LightCyan)),
+                Span::styled("^K", Style::default().fg(Color::LightCyan)),
+                Span::styled(" kill ", Style::default().fg(Color::Gray)),
+                Span::styled("\u{2502} ", Style::default().fg(separator_color)),
+                Span::styled("^W", Style::default().fg(Color::LightCyan)),
                 Span::styled(" quit", Style::default().fg(Color::Gray)),
             ])
         };
