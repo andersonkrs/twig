@@ -7,8 +7,8 @@ use crate::git;
 use crate::tmux::{self, SessionBuilder};
 
 /// List all projects and worktrees with interactive tree view
-pub fn run() -> Result<()> {
-    let action = tree_view::run(None)?;
+pub fn run(focus_current: bool) -> Result<()> {
+    let action = tree_view::run(None, focus_current)?;
 
     match action {
         Some(SelectedAction::StartProject(name)) => start_project_session(&name),

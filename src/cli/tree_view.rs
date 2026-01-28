@@ -140,6 +140,7 @@ impl<'a> TreeViewApp<'a> {
         running_sessions: &[String],
         mode: TreeViewMode,
         current: &CurrentContext,
+        focus_current: bool,
     ) -> Result<Self> {
         let tree_items = build_tree_items(&projects, running_sessions, current)?;
         let candidates = build_candidates(&projects);
@@ -150,7 +151,43 @@ impl<'a> TreeViewApp<'a> {
         for project in &projects {
             tree_state.open(vec![TreeNodeId::Project(project.name.clone())]);
         }
-        if !projects.is_empty() {
+        if focus_current {
+            let mut selected = None;
+
+            if let Some(project_name) = current.project.as_deref() {
+                let has_project = projects.iter().any(|project| project.name == project_name);
+
+                if has_project {
+                    if let Some(branch) = current.worktree.as_deref() {
+                        let has_worktree = projects.iter().any(|project| {
+                            project.name == project_name
+                                && project.worktrees.iter().any(|wt| wt.branch == branch)
+                        });
+
+                        if has_worktree {
+                            selected = Some(vec![
+                                TreeNodeId::Project(project_name.to_string()),
+                                TreeNodeId::Worktree {
+                                    project: project_name.to_string(),
+                                    branch: branch.to_string(),
+                                },
+                            ]);
+                        }
+                    }
+
+                    if selected.is_none() {
+                        selected = Some(vec![TreeNodeId::Project(project_name.to_string())]);
+                    }
+                }
+            }
+
+            if let Some(node_path) = selected {
+                tree_state.select(node_path);
+                tree_state.scroll_selected_into_view();
+            } else if !projects.is_empty() {
+                tree_state.select(vec![TreeNodeId::Project(projects[0].name.clone())]);
+            }
+        } else if !projects.is_empty() {
             tree_state.select(vec![TreeNodeId::Project(projects[0].name.clone())]);
         }
 
@@ -796,7 +833,7 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
 }
 
 /// Run the interactive tree view for starting sessions (with worktrees)
-pub fn run(project_filter: Option<String>) -> Result<Option<SelectedAction>> {
+pub fn run(project_filter: Option<String>, focus_current: bool) -> Result<Option<SelectedAction>> {
     run_with_options(
         LoadOptions {
             project_filter,
@@ -804,6 +841,7 @@ pub fn run(project_filter: Option<String>) -> Result<Option<SelectedAction>> {
             include_worktrees: true,
         },
         TreeViewMode::Start,
+        focus_current,
     )
 }
 
@@ -816,6 +854,7 @@ pub fn run_projects_only() -> Result<Option<SelectedAction>> {
             include_worktrees: false,
         },
         TreeViewMode::Start,
+        false,
     )
 }
 
@@ -828,11 +867,16 @@ pub fn run_for_kill(session_filter: Option<String>) -> Result<Option<SelectedAct
             include_worktrees: true,
         },
         TreeViewMode::Kill,
+        false,
     )
 }
 
 /// Run the interactive tree view with specified options
-fn run_with_options(opts: LoadOptions, mode: TreeViewMode) -> Result<Option<SelectedAction>> {
+fn run_with_options(
+    opts: LoadOptions,
+    mode: TreeViewMode,
+    focus_current: bool,
+) -> Result<Option<SelectedAction>> {
     let filter = opts.project_filter.clone();
     let running_only = opts.running_only;
     let projects = load_project_data(opts)?;
@@ -857,7 +901,7 @@ fn run_with_options(opts: LoadOptions, mode: TreeViewMode) -> Result<Option<Sele
 
     let running_sessions = tmux::list_sessions().unwrap_or_default();
     let current = CurrentContext::from_env();
-    let mut app = TreeViewApp::new(projects, &running_sessions, mode, &current)?;
+    let mut app = TreeViewApp::new(projects, &running_sessions, mode, &current, focus_current)?;
 
     // Setup terminal
     enable_raw_mode()?;

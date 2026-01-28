@@ -27,7 +27,11 @@ enum Commands {
 
     /// List all projects
     #[command(alias = "ls")]
-    List,
+    List {
+        /// Focus on current TWIG_PROJECT/TWIG_WORKTREE
+        #[arg(long)]
+        focus_current: bool,
+    },
 
     /// Create a new project
     #[command(alias = "n")]
@@ -107,7 +111,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Start { project } => cli::start::run(project),
-        Commands::List => cli::list::run(),
+        Commands::List { focus_current } => cli::list::run(focus_current),
         Commands::New { name } => cli::new::run(name),
         Commands::Edit { project } => cli::edit::run(project),
         Commands::Delete { project } => cli::delete::run(project),

@@ -69,7 +69,7 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
 }
 
 pub fn list(project_name: Option<String>) -> Result<()> {
-    let action = tree_view::run(project_name)?;
+    let action = tree_view::run(project_name, false)?;
 
     match action {
         Some(SelectedAction::StartProject(name)) => start_project_session(&name),
