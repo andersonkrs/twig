@@ -63,20 +63,6 @@ enum Commands {
         #[command(subcommand)]
         action: TreeCommands,
     },
-
-    /// Project operations
-    #[command(alias = "p")]
-    Project {
-        #[command(subcommand)]
-        action: ProjectCommands,
-    },
-}
-
-#[derive(Subcommand)]
-enum ProjectCommands {
-    /// List projects (without worktrees)
-    #[command(alias = "ls")]
-    List,
 }
 
 #[derive(Subcommand)]
@@ -131,9 +117,6 @@ fn main() -> Result<()> {
             TreeCommands::List { project } => cli::worktree::list(project),
             TreeCommands::Delete { project, branch } => cli::worktree::delete(project, branch),
             TreeCommands::Merge { project, branch } => cli::worktree::merge(project, branch),
-        },
-        Commands::Project { action } => match action {
-            ProjectCommands::List => cli::project::list(),
         },
     }
 }
