@@ -304,6 +304,12 @@ impl<'a> TreeViewApp<'a> {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.tree_state.key_down();
             }
+            KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.tree_state.key_up();
+            }
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.tree_state.key_down();
+            }
             KeyCode::Left | KeyCode::Char('h') => {
                 self.tree_state.key_left();
             }
@@ -370,6 +376,12 @@ impl<'a> TreeViewApp<'a> {
                 self.tree_state.key_up();
             }
             KeyCode::Down => {
+                self.tree_state.key_down();
+            }
+            KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.tree_state.key_up();
+            }
+            KeyCode::Char('n') if modifiers.contains(KeyModifiers::CONTROL) => {
                 self.tree_state.key_down();
             }
 
@@ -478,6 +490,8 @@ impl<'a> TreeViewApp<'a> {
 
         let mut spans = vec![
             Span::styled("j/k", Style::default().fg(Color::LightCyan)),
+            Span::styled(" or ", Style::default().fg(Color::Gray)),
+            Span::styled("^p/^n", Style::default().fg(Color::LightCyan)),
             Span::styled(" nav ", Style::default().fg(Color::Gray)),
             Span::styled("\u{2502} ", Style::default().fg(separator_color)),
             Span::styled("/", Style::default().fg(Color::LightCyan)),
