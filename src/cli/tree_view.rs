@@ -845,19 +845,6 @@ pub fn run(project_filter: Option<String>, focus_current: bool) -> Result<Option
     )
 }
 
-/// Run the interactive tree view for projects only (no worktrees)
-pub fn run_projects_only() -> Result<Option<SelectedAction>> {
-    run_with_options(
-        LoadOptions {
-            project_filter: None,
-            running_only: false,
-            include_worktrees: false,
-        },
-        TreeViewMode::Start,
-        false,
-    )
-}
-
 /// Run the interactive tree view for killing sessions (shows only running)
 pub fn run_for_kill(session_filter: Option<String>) -> Result<Option<SelectedAction>> {
     run_with_options(
