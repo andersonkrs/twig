@@ -18,7 +18,7 @@ use tui_tree_widget::{Tree, TreeItem, TreeState};
 
 use crate::config::Project;
 use crate::git::{self, WorktreeInfo};
-use crate::tmux;
+use crate::tmux::{self, SessionBuilder};
 
 /// Current session context from environment
 struct CurrentContext {
@@ -946,7 +946,11 @@ fn run_event_loop(
                             }
                             HandleResult::Action(action) => return Ok(Some(action)),
                             HandleResult::ForkWorktree(project) => {
-                                handle_fork_worktree(terminal, app, &project)?;
+                                // If fork creates a session, return the action to start it
+                                if let Some(action) = handle_fork_worktree(terminal, app, &project)?
+                                {
+                                    return Ok(Some(action));
+                                }
                             }
                             HandleResult::MergeWorktree { project, branch } => {
                                 handle_merge_worktree(terminal, app, &project, &branch)?;
@@ -967,7 +971,7 @@ fn handle_fork_worktree(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut TreeViewApp,
     project_name: &str,
-) -> Result<()> {
+) -> Result<Option<SelectedAction>> {
     let project = match Project::load(project_name) {
         Ok(p) => p,
         Err(e) => {
@@ -975,7 +979,7 @@ fn handle_fork_worktree(
                 "Failed to load project: {}",
                 e
             )));
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -983,7 +987,7 @@ fn handle_fork_worktree(
     let title = format!("New worktree for '{}'", project_name);
     let branch_name = match show_input_overlay(terminal, app, &title, "Enter branch name...")? {
         Some(name) if !name.is_empty() => name,
-        _ => return Ok(()), // Cancelled or empty
+        _ => return Ok(None), // Cancelled or empty
     };
 
     // Show progress
@@ -1001,36 +1005,64 @@ fn handle_fork_worktree(
                 "Failed to create worktree: {}",
                 e
             )));
-            return Ok(());
+            return Ok(None);
         }
     };
 
-    // Run post-create commands if configured (with streaming output dialog)
-    if let Some(mut runner) = git::start_post_create_commands(&project, &worktree_path) {
-        let title = format!("Setting up '{}'", branch_name);
-        let success = show_output_dialog(terminal, app, &title, &mut runner)?;
+    // Create and start tmux session for the worktree
+    let session_name = project.worktree_session_name(&branch_name);
 
-        if !success {
-            app.status_message = Some(StatusMessage::error(
-                "Some post-create commands failed".to_string(),
-            ));
-        } else {
-            app.status_message = Some(StatusMessage::info(format!(
-                "Created worktree '{}'",
-                branch_name
-            )));
-        }
-    } else {
+    // Check if session already exists (unlikely but possible)
+    if tmux::session_exists(&session_name)? {
         app.status_message = Some(StatusMessage::info(format!(
-            "Created worktree '{}'",
-            branch_name
+            "Session '{}' already exists",
+            session_name
         )));
+        return Ok(Some(SelectedAction::StartWorktree {
+            project: project_name.to_string(),
+            branch: branch_name,
+        }));
     }
 
-    // Refresh the tree to show the new worktree
-    app.refresh(Some(project_name))?;
+    // Create the session with setup window
+    let builder = SessionBuilder::new(&project)
+        .with_session_name(session_name.clone())
+        .with_root(worktree_path.to_string_lossy().to_string())
+        .with_worktree(branch_name.clone());
 
-    Ok(())
+    if let Err(e) = builder.create_session() {
+        app.status_message = Some(StatusMessage::error(format!(
+            "Failed to create session: {}",
+            e
+        )));
+        return Ok(None);
+    }
+
+    // If there are post-create commands, run them then setup windows
+    if builder.has_post_create_commands() {
+        if let Err(e) = builder.run_post_create_then("twig project setup-windows") {
+            app.status_message = Some(StatusMessage::error(format!(
+                "Failed to start setup: {}",
+                e
+            )));
+            return Ok(None);
+        }
+    } else {
+        // No post-create commands, setup windows immediately
+        if let Err(e) = builder.setup_windows() {
+            app.status_message = Some(StatusMessage::error(format!(
+                "Failed to setup windows: {}",
+                e
+            )));
+            return Ok(None);
+        }
+    }
+
+    // Return action to start the worktree session
+    Ok(Some(SelectedAction::StartWorktree {
+        project: project_name.to_string(),
+        branch: branch_name,
+    }))
 }
 
 /// Handle merge worktree operation with confirmation
@@ -1379,288 +1411,6 @@ fn render_confirm_dialog(frame: &mut Frame, title: &str, selected_yes: bool) {
     // Help text
     let help_area = Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1);
     let help = Paragraph::new("y/n or Enter to confirm")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-    frame.render_widget(help, help_area);
-}
-
-/// State for the streaming output dialog
-struct OutputDialogState {
-    lines: Vec<OutputLine>,
-    scroll: usize,
-    current_command: Option<String>,
-    finished: bool,
-    success: bool,
-}
-
-/// A line in the output dialog with optional styling
-struct OutputLine {
-    text: String,
-    style: OutputLineStyle,
-}
-
-#[derive(Clone, Copy)]
-enum OutputLineStyle {
-    Normal,
-    Command,
-    Success,
-    Error,
-}
-
-impl OutputDialogState {
-    fn new() -> Self {
-        Self {
-            lines: Vec::new(),
-            scroll: 0,
-            current_command: None,
-            finished: false,
-            success: true,
-        }
-    }
-
-    fn add_line(&mut self, text: String, style: OutputLineStyle) {
-        self.lines.push(OutputLine { text, style });
-    }
-
-    fn scroll_up(&mut self) {
-        self.scroll = self.scroll.saturating_sub(1);
-    }
-
-    fn scroll_down(&mut self, visible_lines: usize) {
-        let max_scroll = self.lines.len().saturating_sub(visible_lines);
-        self.scroll = (self.scroll + 1).min(max_scroll);
-    }
-
-    fn scroll_to_bottom(&mut self, visible_lines: usize) {
-        self.scroll = self.lines.len().saturating_sub(visible_lines);
-    }
-}
-
-/// Show a streaming output dialog for command execution
-fn show_output_dialog(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut TreeViewApp,
-    title: &str,
-    runner: &mut git::CommandRunner,
-) -> Result<bool> {
-    use git::CommandOutput;
-
-    let mut state = OutputDialogState::new();
-
-    loop {
-        // Process any pending output
-        while let Some(output) = runner.try_recv() {
-            match output {
-                CommandOutput::CommandStarted(cmd) => {
-                    state.current_command = Some(cmd.clone());
-                    state.add_line(format!("$ {}", cmd), OutputLineStyle::Command);
-                }
-                CommandOutput::Line(line) => {
-                    state.add_line(line, OutputLineStyle::Normal);
-                }
-                CommandOutput::CommandFinished { success, command } => {
-                    if success {
-                        state.add_line(
-                            "Command completed successfully".to_string(),
-                            OutputLineStyle::Success,
-                        );
-                    } else {
-                        state.add_line(
-                            format!("Command failed: {}", command),
-                            OutputLineStyle::Error,
-                        );
-                        state.success = false;
-                    }
-                    state.add_line(String::new(), OutputLineStyle::Normal);
-                    state.current_command = None;
-                }
-                CommandOutput::AllDone { success } => {
-                    state.finished = true;
-                    state.success = success;
-                    if success {
-                        state.add_line(
-                            "All commands completed successfully!".to_string(),
-                            OutputLineStyle::Success,
-                        );
-                    } else {
-                        state.add_line("Some commands failed.".to_string(), OutputLineStyle::Error);
-                    }
-                }
-            }
-        }
-
-        // Calculate visible lines for auto-scroll
-        let area = terminal.size()?;
-        let dialog_height = (area.height * 3 / 4).max(10);
-        let visible_lines = (dialog_height as usize).saturating_sub(4);
-
-        // Auto-scroll to bottom when new content arrives
-        if !state.finished {
-            state.scroll_to_bottom(visible_lines);
-        }
-
-        // Render
-        terminal.draw(|frame| {
-            app.render(frame);
-            render_output_dialog(frame, title, &state);
-        })?;
-
-        // Handle input (with short poll for responsiveness)
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Esc | KeyCode::Char('q') if state.finished => {
-                            return Ok(state.success);
-                        }
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            // Allow Ctrl+C to exit even if not finished
-                            return Ok(state.success);
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            state.scroll_up();
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            state.scroll_down(visible_lines);
-                        }
-                        KeyCode::PageUp => {
-                            for _ in 0..visible_lines {
-                                state.scroll_up();
-                            }
-                        }
-                        KeyCode::PageDown => {
-                            for _ in 0..visible_lines {
-                                state.scroll_down(visible_lines);
-                            }
-                        }
-                        KeyCode::Home => {
-                            state.scroll = 0;
-                        }
-                        KeyCode::End => {
-                            state.scroll_to_bottom(visible_lines);
-                        }
-                        KeyCode::Enter if state.finished => {
-                            return Ok(state.success);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        // Small delay to avoid busy-waiting when no events
-        if !runner.is_running() && state.finished {
-            // Give user a moment to see the final state
-            continue;
-        }
-    }
-}
-
-/// Render the output dialog
-fn render_output_dialog(frame: &mut Frame, title: &str, state: &OutputDialogState) {
-    use ratatui::widgets::Clear;
-
-    let area = frame.size();
-
-    // Dialog takes up most of the screen (75% width, 75% height)
-    let dialog_width = (area.width * 3 / 4).max(60).min(area.width - 4);
-    let dialog_height = (area.height * 3 / 4).max(10).min(area.height - 2);
-    let dialog_x = (area.width.saturating_sub(dialog_width)) / 2;
-    let dialog_y = (area.height.saturating_sub(dialog_height)) / 2;
-
-    let dialog_area = Rect::new(dialog_x, dialog_y, dialog_width, dialog_height);
-
-    // Clear background
-    frame.render_widget(Clear, dialog_area);
-
-    // Dialog box with spinner or status
-    let border_color = if state.finished {
-        if state.success {
-            Color::LightGreen
-        } else {
-            Color::LightRed
-        }
-    } else {
-        Color::LightCyan
-    };
-
-    let status_indicator = if state.finished {
-        if state.success {
-            " Done "
-        } else {
-            " Failed "
-        }
-    } else {
-        " Running... "
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border_color))
-        .title(format!(" {} ", title))
-        .title_style(Style::default().fg(Color::LightCyan).bold())
-        .title_bottom(Line::from(status_indicator).centered())
-        .title_style(Style::default().fg(border_color));
-
-    let inner = block.inner(dialog_area);
-    frame.render_widget(block, dialog_area);
-
-    // Calculate visible area (leave room for help text)
-    let content_height = inner.height.saturating_sub(2) as usize;
-    let content_area = Rect::new(inner.x + 1, inner.y, inner.width - 2, content_height as u16);
-
-    // Render output lines
-    let visible_lines: Vec<Line> = state
-        .lines
-        .iter()
-        .skip(state.scroll)
-        .take(content_height)
-        .map(|line| {
-            let style = match line.style {
-                OutputLineStyle::Normal => Style::default().fg(Color::White),
-                OutputLineStyle::Command => Style::default().fg(Color::LightYellow).bold(),
-                OutputLineStyle::Success => Style::default().fg(Color::LightGreen),
-                OutputLineStyle::Error => Style::default().fg(Color::LightRed),
-            };
-            Line::from(Span::styled(&line.text, style))
-        })
-        .collect();
-
-    let content = Paragraph::new(visible_lines);
-    frame.render_widget(content, content_area);
-
-    // Scroll indicator
-    if state.lines.len() > content_height {
-        let scrollbar_area =
-            Rect::new(inner.x + inner.width - 1, inner.y, 1, content_height as u16);
-
-        let total = state.lines.len();
-        let visible = content_height;
-        let scroll_pos = if total <= visible {
-            0
-        } else {
-            (state.scroll * (content_height - 1)) / (total - visible)
-        };
-
-        for y in 0..content_height {
-            let char = if y == scroll_pos { "█" } else { "░" };
-            let span = Span::styled(char, Style::default().fg(Color::DarkGray));
-            frame.render_widget(
-                Paragraph::new(span),
-                Rect::new(scrollbar_area.x, scrollbar_area.y + y as u16, 1, 1),
-            );
-        }
-    }
-
-    // Help text
-    let help_area = Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1);
-    let help_text = if state.finished {
-        "Press Enter or Esc to close | ↑↓/jk scroll"
-    } else {
-        "Running... | ↑↓/jk scroll | Ctrl+C to cancel"
-    };
-    let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
     frame.render_widget(help, help_area);

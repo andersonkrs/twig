@@ -67,6 +67,13 @@ enum Commands {
         #[command(subcommand)]
         action: TreeCommands,
     },
+
+    /// Project operations
+    #[command(alias = "p")]
+    Project {
+        #[command(subcommand)]
+        action: ProjectCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -106,6 +113,13 @@ enum TreeCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// Setup windows for a session (called after post-create commands)
+    #[command(alias = "sw", hide = true)]
+    SetupWindows,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -121,6 +135,9 @@ fn main() -> Result<()> {
             TreeCommands::List { project } => cli::worktree::list(project),
             TreeCommands::Delete { project, branch } => cli::worktree::delete(project, branch),
             TreeCommands::Merge { project, branch } => cli::worktree::merge(project, branch),
+        },
+        Commands::Project { action } => match action {
+            ProjectCommands::SetupWindows => cli::start::setup_windows(),
         },
     }
 }

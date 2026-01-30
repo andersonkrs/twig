@@ -125,6 +125,9 @@ worktree:
     - bundle install
     - yarn install
     - rails db:migrate
+
+  # Note: post_create runs inside a temporary setup window in the worktree session
+  # so your shell init and environment (mise/rbenv/etc) are applied.
 ```
 
 ### Example Configs

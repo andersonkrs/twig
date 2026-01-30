@@ -36,17 +36,6 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
     let worktree_path = git::create_worktree(&project, branch_name)?;
     println!("Created worktree at: {:?}", worktree_path);
 
-    // Run post-create commands if configured
-    if project
-        .worktree
-        .as_ref()
-        .map(|w| !w.post_create.is_empty())
-        .unwrap_or(false)
-    {
-        println!("Running post-create commands...");
-        git::run_post_create_commands(&project, &worktree_path)?;
-    }
-
     // Create tmux session for the worktree
     let session_name = project.worktree_session_name(branch_name);
 
@@ -57,11 +46,22 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
     }
 
     println!("Starting session '{}'...", session_name);
-    SessionBuilder::new(&project)
+
+    let builder = SessionBuilder::new(&project)
         .with_session_name(session_name.clone())
         .with_root(worktree_path.to_string_lossy().to_string())
-        .with_worktree(branch_name.to_string())
-        .build()?;
+        .with_worktree(branch_name.to_string());
+
+    // Create session with setup window
+    builder.create_session()?;
+
+    // If there are post-create commands, run them first, then setup windows
+    if builder.has_post_create_commands() {
+        builder.run_post_create_then("twig project setup-windows")?;
+    } else {
+        // No post-create commands, setup windows immediately
+        builder.setup_windows()?;
+    }
 
     tmux::connect_to_session(&session_name)?;
 

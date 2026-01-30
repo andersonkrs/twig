@@ -134,16 +134,24 @@ pub struct SessionBuilder {
     windows: Vec<Window>,
     project_name: String,
     worktree_branch: Option<String>,
+    post_create_commands: Vec<String>,
 }
 
 impl SessionBuilder {
     pub fn new(project: &Project) -> Self {
+        let post_create_commands = project
+            .worktree
+            .as_ref()
+            .map(|w| w.post_create.clone())
+            .unwrap_or_default();
+
         Self {
             session_name: project.name.clone(),
             root: project.root.clone(),
             windows: project.windows.clone(),
             project_name: project.name.clone(),
             worktree_branch: None,
+            post_create_commands,
         }
     }
 
@@ -162,16 +170,12 @@ impl SessionBuilder {
         self
     }
 
-    /// Build and start the tmux session
-    pub fn build(&self) -> Result<()> {
+    /// Create the session with a single setup window.
+    /// Call `setup_windows()` after post-create commands to configure windows/panes.
+    pub fn create_session(&self) -> Result<()> {
         let root_expanded = shellexpand::tilde(&self.root).to_string();
 
-        // Create the session with the first window
-        let first_window = self.windows.first();
-        let first_window_name = first_window
-            .map(|w| w.name())
-            .unwrap_or_else(|| "shell".to_string());
-
+        // Create the session with a temporary setup window
         Command::new("tmux")
             .args([
                 "new-session",
@@ -179,7 +183,7 @@ impl SessionBuilder {
                 "-s",
                 &self.session_name,
                 "-n",
-                &first_window_name,
+                "setup",
                 "-c",
                 &root_expanded,
             ])
@@ -211,8 +215,71 @@ impl SessionBuilder {
                 .context("Failed to set TWIG_WORKTREE")?;
         }
 
-        // Get the base index for windows
+        Ok(())
+    }
+
+    /// Run post-create commands in the session's setup window.
+    /// Commands are chained with && so the last command's completion triggers setup.
+    pub fn run_post_create_in_session(&self) -> Result<()> {
+        if self.post_create_commands.is_empty() {
+            return Ok(());
+        }
+
+        let target = format!("{}:setup", self.session_name);
+        let chained_commands = self.post_create_commands.join(" && ");
+
+        send_keys(&target, &chained_commands)?;
+
+        Ok(())
+    }
+
+    /// Run post-create commands followed by a final command.
+    /// All commands are chained with && so they run sequentially.
+    pub fn run_post_create_then(&self, final_cmd: &str) -> Result<()> {
+        let target = format!("{}:setup", self.session_name);
+
+        let chained = if self.post_create_commands.is_empty() {
+            final_cmd.to_string()
+        } else {
+            format!(
+                "{} && {}",
+                self.post_create_commands.join(" && "),
+                final_cmd
+            )
+        };
+
+        send_keys(&target, &chained)?;
+
+        Ok(())
+    }
+
+    /// Check if there are post-create commands to run
+    pub fn has_post_create_commands(&self) -> bool {
+        !self.post_create_commands.is_empty()
+    }
+
+    /// Setup all windows and panes from the project configuration.
+    /// This should be called after post-create commands complete.
+    pub fn setup_windows(&self) -> Result<()> {
+        let root_expanded = shellexpand::tilde(&self.root).to_string();
         let base_index = get_base_index();
+
+        // Get first window name for setup
+        let first_window = self.windows.first();
+        let first_window_name = first_window
+            .map(|w| w.name())
+            .unwrap_or_else(|| "shell".to_string());
+
+        // Rename the setup window to the first window name
+        Command::new("tmux")
+            .args([
+                "rename-window",
+                "-t",
+                &format!("{}:setup", self.session_name),
+                &first_window_name,
+            ])
+            .status()
+            .context("Failed to rename setup window")?;
 
         // Set up the first window
         if let Some(window) = first_window {
@@ -228,7 +295,6 @@ impl SessionBuilder {
         for window in self.windows.iter().skip(1) {
             let window_name = window.name();
 
-            // Use -a to append after current window, avoiding index conflicts
             Command::new("tmux")
                 .args([
                     "new-window",
@@ -245,7 +311,7 @@ impl SessionBuilder {
             self.setup_window(&self.session_name, &window_name, window, &root_expanded)?;
         }
 
-        // Select the first window (use base-index)
+        // Select the first window
         Command::new("tmux")
             .args([
                 "select-window",
@@ -254,6 +320,24 @@ impl SessionBuilder {
             ])
             .status()
             .ok();
+
+        Ok(())
+    }
+
+    /// Build and start the tmux session (legacy method for backwards compatibility).
+    /// Creates session, runs post-create commands, and sets up windows in one call.
+    pub fn build(&self) -> Result<()> {
+        self.create_session()?;
+
+        // If there are post-create commands, run them but don't wait
+        // The old behavior was to set up windows immediately
+        if !self.post_create_commands.is_empty() {
+            // For backwards compatibility, we run commands but continue with setup
+            // Note: This doesn't wait for completion like the new flow
+            self.run_post_create_in_session()?;
+        }
+
+        self.setup_windows()?;
 
         Ok(())
     }
