@@ -48,6 +48,9 @@ twig edit [project]      # Open config in $EDITOR
 twig delete [project]    # Delete project config
 twig stop [project]      # Kill tmux session
 
+# Debug tmux control-mode I/O
+TWIG_TMUX_DEBUG=1 twig window new [project] [name]
+
 # Worktree commands
 twig tree create [project] [branch]   # Create worktree + session
 twig tree list [project]              # List worktrees

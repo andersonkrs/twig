@@ -141,6 +141,53 @@ enum WindowCommands {
         #[arg(long)]
         socket: Option<String>,
     },
+
+    /// Create a new window and run a command in it
+    #[command(alias = "nr")]
+    NewRun {
+        /// Project/session name (interactive selection if not provided)
+        project: Option<String>,
+        /// Window name
+        name: Option<String>,
+        /// Command to run
+        #[arg(trailing_var_arg = true)]
+        command: Vec<String>,
+        /// Tmux socket path to target
+        #[arg(long)]
+        socket: Option<String>,
+    },
+
+    /// Run a command in a new pane for a window
+    #[command(alias = "r")]
+    Run {
+        /// Window index or name
+        window: String,
+        /// Command to run
+        #[arg(trailing_var_arg = true)]
+        command: Vec<String>,
+        /// Project/session name (defaults to current tmux session if available)
+        #[arg(long)]
+        project: Option<String>,
+        /// Tmux socket path to target
+        #[arg(long)]
+        socket: Option<String>,
+    },
+
+    /// List panes for a window
+    #[command(alias = "lp")]
+    ListPanes {
+        /// Window index or name
+        window: String,
+        /// Project/session name (defaults to current tmux session if available)
+        #[arg(long)]
+        project: Option<String>,
+        /// Tmux socket path to target
+        #[arg(long)]
+        socket: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -168,6 +215,24 @@ fn main() -> Result<()> {
                 name,
                 socket,
             } => cli::window::new(project, name, socket),
+            WindowCommands::NewRun {
+                project,
+                name,
+                command,
+                socket,
+            } => cli::window::new_run(project, name, command, socket),
+            WindowCommands::Run {
+                window,
+                command,
+                project,
+                socket,
+            } => cli::window::run(project, window, command, socket),
+            WindowCommands::ListPanes {
+                window,
+                project,
+                socket,
+                json,
+            } => cli::window::list_panes(project, window, socket, json),
         },
     }
 }

@@ -9,6 +9,7 @@ license = "MIT"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+serde_json = "1"
 shellexpand = "3"
 dirs = "5"
 anyhow = "1"

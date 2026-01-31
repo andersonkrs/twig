@@ -74,6 +74,26 @@ pub fn current_session_name() -> Option<String> {
     }
 }
 
+/// Get the current tmux session name for a specific socket
+pub fn current_session_name_with_socket(socket_path: &str) -> Option<String> {
+    let output = Command::new("tmux")
+        .args([
+            "-S",
+            socket_path,
+            "display-message",
+            "-p",
+            "#{session_name}",
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
 /// Detach from current tmux session
 pub fn detach() -> Result<()> {
     Command::new("tmux")
