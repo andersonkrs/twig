@@ -6,7 +6,11 @@ use crate::tmux;
 use crate::tmux_control::ControlClient;
 use crate::ui;
 
-pub fn new(project_name: Option<String>, window_name: Option<String>) -> Result<()> {
+pub fn new(
+    project_name: Option<String>,
+    window_name: Option<String>,
+    socket: Option<String>,
+) -> Result<()> {
     let name = match project_name {
         Some(n) => n,
         None => ui::select_project("Select project...")?
@@ -21,10 +25,12 @@ pub fn new(project_name: Option<String>, window_name: Option<String>) -> Result<
 
     let project = Project::load(&name)?;
 
-    let socket_path = env::var("TMUX")
-        .ok()
-        .and_then(|value| value.split(',').next().map(|part| part.to_string()))
-        .filter(|value| !value.is_empty());
+    let socket_path = socket.or_else(|| {
+        env::var("TMUX")
+            .ok()
+            .and_then(|value| value.split(',').next().map(|part| part.to_string()))
+            .filter(|value| !value.is_empty())
+    });
 
     let session_exists = match socket_path.as_deref() {
         Some(path) => tmux::session_exists_with_socket(&project.name, path)?,

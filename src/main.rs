@@ -137,6 +137,9 @@ enum WindowCommands {
         project: Option<String>,
         /// Window name
         name: Option<String>,
+        /// Tmux socket path to target
+        #[arg(long)]
+        socket: Option<String>,
     },
 }
 
@@ -160,7 +163,11 @@ fn main() -> Result<()> {
             ProjectCommands::SetupWindows => cli::start::setup_windows(),
         },
         Commands::Window { action } => match action {
-            WindowCommands::New { project, name } => cli::window::new(project, name),
+            WindowCommands::New {
+                project,
+                name,
+                socket,
+            } => cli::window::new(project, name, socket),
         },
     }
 }
