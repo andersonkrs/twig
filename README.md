@@ -225,6 +225,14 @@ bind-key s display-popup -E -w 80% -h 60% "twig ls --focus-current"
 If you want the popup to always open from anywhere (not just inside a twig session), it
 will still work but will fall back to the first project when the env vars are not set.
 
+## Releases
+
+- A draft release is updated on every push to `main`.
+- Label PRs with `release:major`, `release:minor`, or `release:patch` to pick the next
+  version (defaults to patch). Use `skip-changelog` to omit a PR from notes.
+- Publishing the draft release creates the tag and uploads binaries for linux x86_64 and
+  macOS universal2.
+
 ## Development
 
 ```bash

@@ -1,0 +1,40 @@
+name-template: "v$NEXT_PATCH_VERSION"
+tag-template: "v$NEXT_PATCH_VERSION"
+version-template: "$MAJOR.$MINOR.$PATCH"
+
+version-resolver:
+  major:
+    labels:
+      - "release:major"
+  minor:
+    labels:
+      - "release:minor"
+  patch:
+    labels:
+      - "release:patch"
+  default: patch
+
+categories:
+  - title: "Features"
+    labels:
+      - "feature"
+      - "enhancement"
+  - title: "Fixes"
+    labels:
+      - "fix"
+      - "bug"
+  - title: "Maintenance"
+    labels:
+      - "chore"
+      - "refactor"
+      - "ci"
+      - "docs"
+      - "test"
+
+exclude-labels:
+  - "skip-changelog"
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+template: |
+  ## Changes
+  $CHANGES

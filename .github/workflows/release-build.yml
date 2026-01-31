@@ -1,0 +1,71 @@
+name: Release Binaries
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build linux x86_64
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Package linux binary
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          mkdir -p dist
+          cp "target/x86_64-unknown-linux-gnu/release/twig" "dist/twig"
+          tar -czf "dist/twig-${tag}-linux-x86_64.tar.gz" -C dist twig
+
+      - name: Upload linux artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/twig-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Build macOS x86_64
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Build macOS arm64
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Create universal2 binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            "target/x86_64-apple-darwin/release/twig" \
+            "target/aarch64-apple-darwin/release/twig" \
+            -output "dist/twig"
+
+      - name: Package macOS universal2 binary
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          tar -czf "dist/twig-${tag}-macos-universal2.tar.gz" -C dist twig
+
+      - name: Upload macOS artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/twig-${{ github.event.release.tag_name }}-macos-universal2.tar.gz
