@@ -246,11 +246,10 @@ will still work but will fall back to the first project when the env vars are no
 
 ## Releases
 
-- A draft release is updated on every push to `main`.
-- Label PRs with `release:major`, `release:minor`, or `release:patch` to pick the next
-  version (defaults to patch). Use `skip-changelog` to omit a PR from notes.
-- Publishing the draft release creates the tag and uploads binaries for linux x86_64 and
-  macOS universal2.
+- Releases are managed by release-plz using conventional commits to determine the bump.
+- A release PR is created/updated on every push to `main`.
+- Merge the release PR to tag and publish a GitHub release; binaries are uploaded for
+  linux x86_64 and macOS universal2.
 
 ## Development
 
