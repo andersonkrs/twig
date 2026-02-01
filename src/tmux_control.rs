@@ -224,6 +224,40 @@ impl ControlClient {
         Ok(output)
     }
 
+    pub fn new_session(
+        &mut self,
+        session: &str,
+        window: &str,
+        cwd: &std::path::Path,
+        env: &[(&str, &str)],
+    ) -> Result<()> {
+        let mut command = format!(
+            "new-session -d -s {} -n {} -c {}",
+            quote_tmux_arg(session),
+            quote_tmux_arg(window),
+            quote_tmux_arg(&cwd.to_string_lossy())
+        );
+
+        for (key, value) in env {
+            let entry = format!("{}={}", key, value);
+            command.push_str(&format!(" -e {}", quote_tmux_arg(&entry)));
+        }
+
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn set_environment(&mut self, session: &str, key: &str, value: &str) -> Result<()> {
+        let command = format!(
+            "set-environment -t {} {} {}",
+            quote_tmux_arg(session),
+            quote_tmux_arg(key),
+            quote_tmux_arg(value)
+        );
+        self.command(&command)?;
+        Ok(())
+    }
+
     pub fn new_window(&mut self, session: &str, name: &str, cwd: &std::path::Path) -> Result<()> {
         let command = format!(
             "new-window -d -t {} -n {} -c {}",
@@ -236,11 +270,24 @@ impl ControlClient {
     }
 
     pub fn split_window(&mut self, target: &str, cwd: &std::path::Path) -> Result<()> {
-        let command = format!(
-            "split-window -t {} -c {}",
+        self.split_window_with_direction(target, cwd, None)
+    }
+
+    pub fn split_window_with_direction(
+        &mut self,
+        target: &str,
+        cwd: &std::path::Path,
+        direction: Option<&str>,
+    ) -> Result<()> {
+        let mut command = String::from("split-window");
+        if let Some(flag) = direction {
+            command.push_str(&format!(" {}", flag));
+        }
+        command.push_str(&format!(
+            " -t {} -c {}",
             quote_tmux_arg(target),
             quote_tmux_arg(&cwd.to_string_lossy())
-        );
+        ));
         self.command(&command)?;
         Ok(())
     }
@@ -256,6 +303,44 @@ impl ControlClient {
             command.push_str(" Enter");
         }
 
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn rename_window(&mut self, target: &str, name: &str) -> Result<()> {
+        let command = format!(
+            "rename-window -t {} {}",
+            quote_tmux_arg(target),
+            quote_tmux_arg(name)
+        );
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn select_window(&mut self, target: &str) -> Result<()> {
+        let command = format!("select-window -t {}", quote_tmux_arg(target));
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn select_layout(&mut self, target: &str, layout: &str) -> Result<()> {
+        let command = format!(
+            "select-layout -t {} {}",
+            quote_tmux_arg(target),
+            quote_tmux_arg(layout)
+        );
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn select_pane(&mut self, target: &str) -> Result<()> {
+        let command = format!("select-pane -t {}", quote_tmux_arg(target));
+        self.command(&command)?;
+        Ok(())
+    }
+
+    pub fn wait_for(&mut self, name: &str) -> Result<()> {
+        let command = format!("wait-for {}", quote_tmux_arg(name));
         self.command(&command)?;
         Ok(())
     }
@@ -287,7 +372,7 @@ fn quote_tmux_arg(value: &str) -> String {
 }
 
 fn debug_enabled() -> bool {
-    std::env::var_os("TWIG_TMUX_DEBUG").is_some()
+    std::env::var_os("TWIG_DEBUG").is_some()
 }
 
 fn unique_nonce() -> u128 {

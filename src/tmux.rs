@@ -1,7 +1,13 @@
-use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context, Result};
 
 use crate::config::{Project, Window};
+use crate::tmux_control::ControlClient;
+
+const SETUP_WINDOW_NAME: &str = "setup-twig";
 
 /// Check if a tmux session exists
 pub fn session_exists(name: &str) -> Result<bool> {
@@ -232,102 +238,6 @@ impl SessionBuilder {
         self
     }
 
-    /// Create the session with a single setup window.
-    /// Call `setup_windows()` after post-create commands to configure windows/panes.
-    pub fn create_session(&self) -> Result<()> {
-        let root_expanded = shellexpand::tilde(&self.root).to_string();
-
-        // Create the session with a temporary setup window
-        let mut new_session_cmd = Command::new("tmux");
-        new_session_cmd.args([
-            "new-session",
-            "-d",
-            "-s",
-            &self.session_name,
-            "-n",
-            "setup",
-            "-c",
-            &root_expanded,
-            "-e",
-            &format!("TWIG_PROJECT={}", self.project_name),
-        ]);
-
-        if let Some(branch) = &self.worktree_branch {
-            new_session_cmd.args(["-e", &format!("TWIG_WORKTREE={}", branch)]);
-        }
-
-        new_session_cmd
-            .status()
-            .context("Failed to create tmux session")?;
-
-        // Set twig environment variables for the session
-        Command::new("tmux")
-            .args([
-                "set-environment",
-                "-t",
-                &self.session_name,
-                "TWIG_PROJECT",
-                &self.project_name,
-            ])
-            .status()
-            .context("Failed to set TWIG_PROJECT")?;
-
-        if let Some(branch) = &self.worktree_branch {
-            Command::new("tmux")
-                .args([
-                    "set-environment",
-                    "-t",
-                    &self.session_name,
-                    "TWIG_WORKTREE",
-                    branch,
-                ])
-                .status()
-                .context("Failed to set TWIG_WORKTREE")?;
-        }
-
-        Ok(())
-    }
-
-    /// Run post-create commands in the session's setup window.
-    /// Commands are chained with && so the last command's completion triggers setup.
-    pub fn run_post_create_in_session(&self) -> Result<()> {
-        if self.post_create_commands.is_empty() {
-            return Ok(());
-        }
-
-        let target = format!("{}:setup", self.session_name);
-        let chained_commands = self.post_create_commands.join(" && ");
-
-        send_keys(&target, &chained_commands)?;
-
-        Ok(())
-    }
-
-    /// Run post-create commands followed by a final command.
-    /// All commands are chained with && so they run sequentially.
-    pub fn run_post_create_then(&self, final_cmd: &str) -> Result<()> {
-        let target = format!("{}:setup", self.session_name);
-
-        let chained = if self.post_create_commands.is_empty() {
-            final_cmd.to_string()
-        } else {
-            format!(
-                "{} && {}",
-                self.post_create_commands.join(" && "),
-                final_cmd
-            )
-        };
-
-        send_keys(&target, &chained)?;
-
-        Ok(())
-    }
-
-    /// Check if there are post-create commands to run
-    pub fn has_post_create_commands(&self) -> bool {
-        !self.post_create_commands.is_empty()
-    }
-
     /// Setup all windows and panes from the project configuration.
     /// This should be called after post-create commands complete.
     pub fn setup_windows(&self) -> Result<()> {
@@ -345,7 +255,7 @@ impl SessionBuilder {
             .args([
                 "rename-window",
                 "-t",
-                &format!("{}:setup", self.session_name),
+                &format!("{}:{}", self.session_name, SETUP_WINDOW_NAME),
                 &first_window_name,
             ])
             .status()
@@ -394,20 +304,91 @@ impl SessionBuilder {
         Ok(())
     }
 
-    /// Build and start the tmux session (legacy method for backwards compatibility).
-    /// Creates session, runs post-create commands, and sets up windows in one call.
-    pub fn build(&self) -> Result<()> {
-        self.create_session()?;
+    /// Start the tmux session using tmux control mode.
+    /// Creates session, runs post-create commands sequentially, then sets up windows.
+    pub fn start_with_control(&self) -> Result<()> {
+        let mut client = ControlClient::connect(None)?;
+        self.create_session_with_control(&mut client)?;
+        self.run_post_create_with_control(&mut client)?;
+        self.setup_windows_with_control(&mut client)?;
+        Ok(())
+    }
 
-        // If there are post-create commands, run them but don't wait
-        // The old behavior was to set up windows immediately
-        if !self.post_create_commands.is_empty() {
-            // For backwards compatibility, we run commands but continue with setup
-            // Note: This doesn't wait for completion like the new flow
-            self.run_post_create_in_session()?;
+    pub fn create_session_with_control(&self, client: &mut ControlClient) -> Result<()> {
+        let root_expanded = PathBuf::from(shellexpand::tilde(&self.root).to_string());
+        let mut env = vec![("TWIG_PROJECT", self.project_name.as_str())];
+        if let Some(branch) = self.worktree_branch.as_deref() {
+            env.push(("TWIG_WORKTREE", branch));
         }
 
-        self.setup_windows()?;
+        client.new_session(&self.session_name, SETUP_WINDOW_NAME, &root_expanded, &env)?;
+
+        client.set_environment(&self.session_name, "TWIG_PROJECT", &self.project_name)?;
+        if let Some(branch) = &self.worktree_branch {
+            client.set_environment(&self.session_name, "TWIG_WORKTREE", branch)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn run_post_create_with_control(&self, client: &mut ControlClient) -> Result<()> {
+        if self.post_create_commands.is_empty() {
+            return Ok(());
+        }
+
+        let target = format!("{}:{}", self.session_name, SETUP_WINDOW_NAME);
+
+        for (index, command) in self.post_create_commands.iter().enumerate() {
+            let trimmed = command.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let token = unique_wait_token(&self.session_name, index);
+            let signal = format!("{}; tmux wait-for -S {}", trimmed, token);
+            client.send_keys(&target, &signal, true)?;
+            client.wait_for(&token)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn setup_windows_with_control(&self, client: &mut ControlClient) -> Result<()> {
+        let root_expanded = PathBuf::from(shellexpand::tilde(&self.root).to_string());
+
+        let first_window = self.windows.first();
+        let first_window_name = first_window
+            .map(|w| w.name())
+            .unwrap_or_else(|| "shell".to_string());
+
+        client.rename_window(
+            &format!("{}:{}", self.session_name, SETUP_WINDOW_NAME),
+            &first_window_name,
+        )?;
+
+        if let Some(window) = first_window {
+            self.setup_window_with_control(
+                client,
+                &self.session_name,
+                &first_window_name,
+                window,
+                &root_expanded,
+            )?;
+        }
+
+        for window in self.windows.iter().skip(1) {
+            let window_name = window.name();
+            client.new_window(&self.session_name, &window_name, &root_expanded)?;
+            self.setup_window_with_control(
+                client,
+                &self.session_name,
+                &window_name,
+                window,
+                &root_expanded,
+            )?;
+        }
+
+        client.select_window(&format!("{}:{}", self.session_name, first_window_name))?;
 
         Ok(())
     }
@@ -473,6 +454,53 @@ impl SessionBuilder {
 
         Ok(())
     }
+
+    fn setup_window_with_control(
+        &self,
+        client: &mut ControlClient,
+        session: &str,
+        window_name: &str,
+        window: &Window,
+        root: &std::path::Path,
+    ) -> Result<()> {
+        let target = format!("{}:{}", session, window_name);
+
+        if window.has_panes() {
+            let panes = window.panes();
+            let layout = window.layout();
+
+            if let Some(first_pane) = panes.first() {
+                if let Some(cmd) = first_pane.command() {
+                    client.send_keys(&target, cmd, true)?;
+                }
+            }
+
+            for pane in panes.iter().skip(1) {
+                let split_arg = if layout.as_deref() == Some("main-horizontal") {
+                    Some("-v")
+                } else {
+                    Some("-h")
+                };
+
+                client.split_window_with_direction(&target, root, split_arg)?;
+
+                if let Some(cmd) = pane.command() {
+                    client.send_keys(&target, cmd, true)?;
+                }
+            }
+
+            if let Some(layout_name) = layout {
+                client.select_layout(&target, &layout_name)?;
+            }
+
+            let base_index = get_base_index();
+            client.select_pane(&format!("{}.{}", target, base_index))?;
+        } else if let Some(cmd) = window.simple_command() {
+            client.send_keys(&target, &cmd, true)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Send keys to a tmux target
@@ -496,6 +524,14 @@ fn get_base_index() -> u32 {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
+}
+
+fn unique_wait_token(session: &str, index: usize) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("twig-post-create-{}-{}-{}", session, index, now)
 }
 
 /// Connect to a session (attach or switch depending on context)
