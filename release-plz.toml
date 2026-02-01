@@ -5,3 +5,4 @@ changelog_path = "CHANGELOG.md"
 name = "twig"
 changelog_path = "CHANGELOG.md"
 git_tag_name = "v{{ version }}"
+publish = false
