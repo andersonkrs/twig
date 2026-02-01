@@ -274,6 +274,7 @@ will still work but will fall back to the first project when the env vars are no
 - A release PR is created/updated on every push to `main`.
 - Merge the release PR to tag and publish a GitHub release; binaries are uploaded for
   linux x86_64 and macOS universal2.
+- You can re-run release checks by triggering the "Release Plz" workflow manually.
 
 ## Development
 
