@@ -307,6 +307,12 @@ impl ControlClient {
         Ok(())
     }
 
+    pub fn kill_session(&mut self, name: &str) -> Result<()> {
+        let command = format!("kill-session -t {}", quote_tmux_arg(name));
+        self.command(&command)?;
+        Ok(())
+    }
+
     pub fn rename_window(&mut self, target: &str, name: &str) -> Result<()> {
         let command = format!(
             "rename-window -t {} {}",
@@ -620,6 +626,47 @@ mod tests {
         assert!(
             !panes.is_empty(),
             "expected panes for session '{}', got none",
+            session
+        );
+    }
+
+    #[test]
+    fn test_control_kill_session_removes_session() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping control mode test");
+            return;
+        }
+
+        let server = unique_server_name();
+        let _guard = ServerGuard::new(server.clone());
+        let session = "twig_test_session";
+
+        let mut client = match ControlClient::connect(Some(&server)) {
+            Ok(client) => client,
+            Err(err) => {
+                eprintln!("tmux control client unavailable: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = client.command(&format!("new-session -d -s {}", session)) {
+            eprintln!("failed to create test session: {err}");
+            return;
+        }
+
+        if let Err(err) = client.kill_session(session) {
+            eprintln!("failed to kill test session: {err}");
+            return;
+        }
+
+        let output = Command::new("tmux")
+            .args(["-L", &server, "has-session", "-t", session])
+            .output()
+            .expect("failed to run tmux has-session");
+
+        assert!(
+            !output.status.success(),
+            "expected session '{}' to be gone",
             session
         );
     }

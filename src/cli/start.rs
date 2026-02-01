@@ -1,8 +1,6 @@
-use std::env;
-
 use anyhow::Result;
 
-use crate::config::{GlobalConfig, Project};
+use crate::config::Project;
 use crate::tmux::{self, SessionBuilder};
 use crate::ui;
 
@@ -34,41 +32,6 @@ pub fn run(project_name: Option<String>) -> Result<()> {
 
     // Connect to the session
     tmux::connect_to_session(&project.name)?;
-
-    Ok(())
-}
-
-/// Internal command to setup windows for an existing session.
-/// Called from within the session after post-create commands complete.
-/// Reads TWIG_PROJECT and TWIG_WORKTREE from environment.
-pub fn setup_windows() -> Result<()> {
-    let project_name = env::var("TWIG_PROJECT")
-        .map_err(|_| anyhow::anyhow!("TWIG_PROJECT not set - must run inside a twig session"))?;
-
-    let project = Project::load(&project_name)?;
-
-    // Check if we're in a worktree session
-    let worktree_branch = env::var("TWIG_WORKTREE").ok();
-
-    let mut builder = SessionBuilder::new(&project);
-
-    // If in a worktree, override root and session name
-    if let Some(ref branch) = worktree_branch {
-        let config = GlobalConfig::load()?;
-        let branch_safe = branch.replace('/', "-");
-        let worktree_path = config
-            .worktree_base_expanded()
-            .join(&project_name)
-            .join(&branch_safe);
-
-        let session_name = project.worktree_session_name(branch);
-
-        builder = builder
-            .with_session_name(session_name)
-            .with_root(worktree_path.to_string_lossy().to_string());
-    }
-
-    builder.setup_windows()?;
 
     Ok(())
 }

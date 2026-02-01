@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread::sleep;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
@@ -143,16 +144,7 @@ pub fn detach() -> Result<()> {
 
 /// Kill a tmux session
 pub fn kill_session(name: &str) -> Result<()> {
-    let status = Command::new("tmux")
-        .args(["kill-session", "-t", name])
-        .status()
-        .context("Failed to kill tmux session")?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to kill session: {}", name);
-    }
-
-    Ok(())
+    kill_session_with_timeout(name, Duration::from_secs(30))
 }
 
 /// Safely kill a session, switching away first if we're inside it
@@ -236,72 +228,6 @@ impl SessionBuilder {
     pub fn with_worktree(mut self, branch: String) -> Self {
         self.worktree_branch = Some(branch);
         self
-    }
-
-    /// Setup all windows and panes from the project configuration.
-    /// This should be called after post-create commands complete.
-    pub fn setup_windows(&self) -> Result<()> {
-        let root_expanded = shellexpand::tilde(&self.root).to_string();
-        let base_index = get_base_index();
-
-        // Get first window name for setup
-        let first_window = self.windows.first();
-        let first_window_name = first_window
-            .map(|w| w.name())
-            .unwrap_or_else(|| "shell".to_string());
-
-        // Rename the setup window to the first window name
-        Command::new("tmux")
-            .args([
-                "rename-window",
-                "-t",
-                &format!("{}:{}", self.session_name, SETUP_WINDOW_NAME),
-                &first_window_name,
-            ])
-            .status()
-            .context("Failed to rename setup window")?;
-
-        // Set up the first window
-        if let Some(window) = first_window {
-            self.setup_window(
-                &self.session_name,
-                &first_window_name,
-                window,
-                &root_expanded,
-            )?;
-        }
-
-        // Create remaining windows
-        for window in self.windows.iter().skip(1) {
-            let window_name = window.name();
-
-            Command::new("tmux")
-                .args([
-                    "new-window",
-                    "-t",
-                    &self.session_name,
-                    "-n",
-                    &window_name,
-                    "-c",
-                    &root_expanded,
-                ])
-                .status()
-                .context("Failed to create tmux window")?;
-
-            self.setup_window(&self.session_name, &window_name, window, &root_expanded)?;
-        }
-
-        // Select the first window
-        Command::new("tmux")
-            .args([
-                "select-window",
-                "-t",
-                &format!("{}:{}", self.session_name, base_index),
-            ])
-            .status()
-            .ok();
-
-        Ok(())
     }
 
     /// Start the tmux session using tmux control mode.
@@ -393,68 +319,6 @@ impl SessionBuilder {
         Ok(())
     }
 
-    fn setup_window(
-        &self,
-        session: &str,
-        window_name: &str,
-        window: &Window,
-        root: &str,
-    ) -> Result<()> {
-        // Use window name instead of index for more reliable targeting
-        let target = format!("{}:{}", session, window_name);
-
-        if window.has_panes() {
-            let panes = window.panes();
-            let layout = window.layout();
-
-            // First pane already exists, run its command if any
-            if let Some(first_pane) = panes.first() {
-                if let Some(cmd) = first_pane.command() {
-                    send_keys(&target, cmd)?;
-                }
-            }
-
-            // Create additional panes
-            for pane in panes.iter().skip(1) {
-                // Split based on layout preference
-                let split_arg = if layout.as_deref() == Some("main-horizontal") {
-                    "-v"
-                } else {
-                    "-h" // Default to horizontal split (vertical panes)
-                };
-
-                Command::new("tmux")
-                    .args(["split-window", split_arg, "-t", &target, "-c", root])
-                    .status()
-                    .context("Failed to split tmux pane")?;
-
-                if let Some(cmd) = pane.command() {
-                    // Send to the last pane
-                    send_keys(&target, cmd)?;
-                }
-            }
-
-            // Apply layout if specified
-            if let Some(layout_name) = layout {
-                Command::new("tmux")
-                    .args(["select-layout", "-t", &target, &layout_name])
-                    .status()
-                    .ok();
-            }
-
-            // Select first pane
-            Command::new("tmux")
-                .args(["select-pane", "-t", &format!("{}.0", target)])
-                .status()
-                .ok();
-        } else if let Some(cmd) = window.simple_command() {
-            // Simple window with a single command
-            send_keys(&target, &cmd)?;
-        }
-
-        Ok(())
-    }
-
     fn setup_window_with_control(
         &self,
         client: &mut ControlClient,
@@ -503,16 +367,6 @@ impl SessionBuilder {
     }
 }
 
-/// Send keys to a tmux target
-fn send_keys(target: &str, keys: &str) -> Result<()> {
-    Command::new("tmux")
-        .args(["send-keys", "-t", target, keys, "Enter"])
-        .status()
-        .context("Failed to send keys to tmux")?;
-
-    Ok(())
-}
-
 /// Get tmux base-index setting (default is 0, but users often set to 1)
 fn get_base_index() -> u32 {
     let output = Command::new("tmux")
@@ -532,6 +386,24 @@ fn unique_wait_token(session: &str, index: usize) -> String {
         .unwrap_or_default()
         .as_nanos();
     format!("twig-post-create-{}-{}-{}", session, index, now)
+}
+
+fn kill_session_with_timeout(name: &str, timeout: Duration) -> Result<()> {
+    let mut client = ControlClient::connect(None)?;
+    client.kill_session(name)?;
+
+    let start = Instant::now();
+    loop {
+        if !session_exists(name)? {
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            anyhow::bail!("Timed out waiting for session '{}' to stop", name);
+        }
+
+        sleep(Duration::from_millis(200));
+    }
 }
 
 /// Connect to a session (attach or switch depending on context)
