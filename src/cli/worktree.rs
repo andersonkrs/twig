@@ -52,16 +52,8 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
         .with_root(worktree_path.to_string_lossy().to_string())
         .with_worktree(branch_name.to_string());
 
-    // Create session with setup window
-    builder.create_session()?;
-
-    // If there are post-create commands, run them first, then setup windows
-    if builder.has_post_create_commands() {
-        builder.run_post_create_then("twig project setup-windows")?;
-    } else {
-        // No post-create commands, setup windows immediately
-        builder.setup_windows()?;
-    }
+    // Create session, run post-create, then setup windows via control mode
+    builder.start_with_control()?;
 
     tmux::connect_to_session(&session_name)?;
 
@@ -98,7 +90,7 @@ fn start_project_session(name: &str) -> Result<()> {
     project.clone_if_needed()?;
 
     println!("Starting session '{}'...", project.name);
-    SessionBuilder::new(&project).build()?;
+    SessionBuilder::new(&project).start_with_control()?;
     tmux::connect_to_session(&project.name)?;
 
     Ok(())
@@ -127,7 +119,7 @@ fn start_worktree_session(project_name: &str, branch: &str) -> Result<()> {
         .with_session_name(session_name.clone())
         .with_root(worktree.path.to_string_lossy().to_string())
         .with_worktree(branch.to_string())
-        .build()?;
+        .start_with_control()?;
 
     tmux::connect_to_session(&session_name)?;
 

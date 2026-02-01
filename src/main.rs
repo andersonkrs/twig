@@ -11,6 +11,9 @@ mod ui;
 #[derive(Parser)]
 #[command(name = "twig")]
 #[command(about = "Tmux session manager with git worktree support")]
+#[command(
+    after_long_help = "Debug: set TWIG_DEBUG=1 to enable verbose tmux control output on stderr."
+)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]

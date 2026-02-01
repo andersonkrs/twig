@@ -28,18 +28,9 @@ pub fn run(project_name: Option<String>) -> Result<()> {
     // Create the session builder
     let builder = SessionBuilder::new(&project);
 
-    // Create session with setup window
+    // Create session, run post-create, then setup windows via control mode
     println!("Starting session '{}'...", project.name);
-    builder.create_session()?;
-
-    // If there are post-create commands, run them first, then setup windows
-    if builder.has_post_create_commands() {
-        // Build the command chain: post-create commands && twig project setup-windows
-        builder.run_post_create_then("twig project setup-windows")?;
-    } else {
-        // No post-create commands, setup windows immediately
-        builder.setup_windows()?;
-    }
+    builder.start_with_control()?;
 
     // Connect to the session
     tmux::connect_to_session(&project.name)?;

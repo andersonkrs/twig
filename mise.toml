@@ -2,7 +2,7 @@
 _.file = { path = ".env" }
 
 [tools]
-rust = "latest"
+rust = { version = "stable", postinstall = "mise exec -- rustup component add clippy rustfmt rust-analyzer" }
 lefthook = "latest"
 
 [hooks.postinstall]

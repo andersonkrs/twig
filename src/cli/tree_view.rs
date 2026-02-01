@@ -2,6 +2,8 @@
 
 use std::env;
 use std::io::{self, stdout, IsTerminal};
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -98,6 +100,18 @@ struct StatusMessage {
     timestamp: Instant,
 }
 
+struct BusyState {
+    message: String,
+    spinner_index: usize,
+    last_tick: Instant,
+    receiver: mpsc::Receiver<BusyResult>,
+}
+
+enum BusyResult {
+    Ready(String),
+    Error(String),
+}
+
 impl StatusMessage {
     fn info(text: impl Into<String>) -> Self {
         Self {
@@ -132,6 +146,7 @@ struct TreeViewApp<'a> {
     status_message: Option<StatusMessage>,
     /// Session to switch to after exiting (when current session was deleted)
     switch_to_session: Option<String>,
+    busy: Option<BusyState>,
 }
 
 impl<'a> TreeViewApp<'a> {
@@ -201,6 +216,7 @@ impl<'a> TreeViewApp<'a> {
             mode,
             status_message: None,
             switch_to_session: None,
+            busy: None,
         })
     }
 
@@ -239,6 +255,10 @@ impl<'a> TreeViewApp<'a> {
     }
 
     fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Option<HandleResult> {
+        if self.busy.is_some() {
+            return None;
+        }
+
         // Search mode handling
         if self.search_mode {
             return self.handle_search_key(code, modifiers);
@@ -320,6 +340,10 @@ impl<'a> TreeViewApp<'a> {
             // Selection
             KeyCode::Enter => {
                 if let Some(action) = self.get_selected_action() {
+                    if self.mode == TreeViewMode::Start {
+                        self.begin_start_session(action);
+                        return None;
+                    }
                     return Some(HandleResult::Action(action));
                 }
             }
@@ -327,6 +351,52 @@ impl<'a> TreeViewApp<'a> {
             _ => {}
         }
         None
+    }
+
+    fn begin_start_session(&mut self, action: SelectedAction) {
+        let message = match &action {
+            SelectedAction::StartProject(name) => format!("Starting '{}'...", name),
+            SelectedAction::StartWorktree { project, branch } => {
+                format!("Starting '{}:{}'...", project, branch)
+            }
+            _ => return,
+        };
+
+        let (tx, rx) = mpsc::channel();
+
+        self.search_mode = false;
+        self.query.clear();
+        self.no_match = false;
+        self.busy = Some(BusyState {
+            message,
+            spinner_index: 0,
+            last_tick: Instant::now(),
+            receiver: rx,
+        });
+
+        thread::spawn(move || {
+            let result = start_session_for_action(action).map_err(|err| err.to_string());
+            let _ = match result {
+                Ok(session) => tx.send(BusyResult::Ready(session)),
+                Err(message) => tx.send(BusyResult::Error(message)),
+            };
+        });
+    }
+
+    fn tick_busy(&mut self) {
+        let Some(ref mut busy) = self.busy else {
+            return;
+        };
+
+        if busy.last_tick.elapsed() >= Duration::from_millis(120) {
+            busy.spinner_index = (busy.spinner_index + 1) % SPINNER_FRAMES.len();
+            busy.last_tick = Instant::now();
+        }
+    }
+
+    fn poll_busy(&mut self) -> Option<BusyResult> {
+        let busy = self.busy.as_ref()?;
+        busy.receiver.try_recv().ok()
     }
 
     fn handle_search_key(
@@ -563,7 +633,13 @@ impl<'a> TreeViewApp<'a> {
 
         // Status bar with styling
         // Check for status message (takes priority)
-        let status_line = if let Some(ref msg) = self.status_message {
+        let status_line = if let Some(ref busy) = self.busy {
+            let frame = SPINNER_FRAMES[busy.spinner_index];
+            Line::from(vec![Span::styled(
+                format!("{} {}", frame, busy.message),
+                Style::default().fg(Color::Yellow),
+            )])
+        } else if let Some(ref msg) = self.status_message {
             if !msg.is_expired() {
                 let color = if msg.is_error {
                     Color::LightRed
@@ -610,6 +686,8 @@ impl<'a> TreeViewApp<'a> {
         frame.render_widget(status, chunks[1]);
     }
 }
+
+const SPINNER_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
 
 enum HandleResult {
     Quit,
@@ -917,14 +995,52 @@ fn run_with_options(
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
 
-    result
+    match result? {
+        EventLoopOutcome::Quit => Ok(None),
+        EventLoopOutcome::Attach(session) => {
+            tmux::connect_to_session(&session)?;
+            Ok(None)
+        }
+        EventLoopOutcome::Action(action) => {
+            if mode == TreeViewMode::Start {
+                match action {
+                    SelectedAction::StartProject(name) => {
+                        tmux::connect_to_session(&name)?;
+                        Ok(None)
+                    }
+                    SelectedAction::StartWorktree { project, branch } => {
+                        let session_name = format!("{}__{}", project, branch);
+                        tmux::connect_to_session(&session_name)?;
+                        Ok(None)
+                    }
+                    _ => Ok(Some(action)),
+                }
+            } else {
+                Ok(Some(action))
+            }
+        }
+    }
 }
 
 fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut TreeViewApp,
-) -> Result<Option<SelectedAction>> {
+) -> Result<EventLoopOutcome> {
     loop {
+        if let Some(result) = app.poll_busy() {
+            app.busy = None;
+            match result {
+                BusyResult::Ready(session) => {
+                    return Ok(EventLoopOutcome::Attach(session));
+                }
+                BusyResult::Error(message) => {
+                    app.status_message = Some(StatusMessage::error(message));
+                }
+            }
+        }
+
+        app.tick_busy();
+
         // Clear expired status messages
         if let Some(ref msg) = app.status_message {
             if msg.is_expired() {
@@ -942,16 +1058,20 @@ fn run_event_loop(
                             HandleResult::Quit => {
                                 // If we need to switch sessions, return that info
                                 if let Some(session) = app.switch_to_session.take() {
-                                    return Ok(Some(SelectedAction::StartProject(session)));
+                                    return Ok(EventLoopOutcome::Action(
+                                        SelectedAction::StartProject(session),
+                                    ));
                                 }
-                                return Ok(None);
+                                return Ok(EventLoopOutcome::Quit);
                             }
-                            HandleResult::Action(action) => return Ok(Some(action)),
+                            HandleResult::Action(action) => {
+                                return Ok(EventLoopOutcome::Action(action));
+                            }
                             HandleResult::ForkWorktree(project) => {
                                 // If fork creates a session, return the action to start it
                                 if let Some(action) = handle_fork_worktree(terminal, app, &project)?
                                 {
-                                    return Ok(Some(action));
+                                    return Ok(EventLoopOutcome::Action(action));
                                 }
                             }
                             HandleResult::MergeWorktree { project, branch } => {
@@ -968,6 +1088,51 @@ fn run_event_loop(
                 }
             }
         }
+    }
+}
+
+enum EventLoopOutcome {
+    Quit,
+    Action(SelectedAction),
+    Attach(String),
+}
+
+fn start_session_for_action(action: SelectedAction) -> Result<String> {
+    match action {
+        SelectedAction::StartProject(name) => {
+            let project = Project::load(&name)?;
+            if tmux::session_exists(&project.name)? {
+                return Ok(project.name);
+            }
+
+            project.clone_if_needed()?;
+            SessionBuilder::new(&project).start_with_control()?;
+            Ok(project.name)
+        }
+        SelectedAction::StartWorktree { project, branch } => {
+            let config = Project::load(&project)?;
+            let session_name = config.worktree_session_name(&branch);
+
+            if tmux::session_exists(&session_name)? {
+                return Ok(session_name);
+            }
+
+            let worktrees = git::list_worktrees(&config)?;
+            let worktree = worktrees
+                .iter()
+                .find(|wt| wt.branch == branch)
+                .ok_or_else(|| anyhow::anyhow!("Worktree '{}' not found", branch))?;
+
+            SessionBuilder::new(&config)
+                .with_session_name(session_name.clone())
+                .with_root(worktree.path.to_string_lossy().to_string())
+                .with_worktree(branch)
+                .start_with_control()?;
+
+            Ok(session_name)
+        }
+        SelectedAction::KillProject(name) => Ok(name),
+        SelectedAction::KillWorktree { project, branch } => Ok(format!("{}__{}", project, branch)),
     }
 }
 
@@ -1035,32 +1200,12 @@ fn handle_fork_worktree(
         .with_root(worktree_path.to_string_lossy().to_string())
         .with_worktree(branch_name.clone());
 
-    if let Err(e) = builder.create_session() {
+    if let Err(e) = builder.start_with_control() {
         app.status_message = Some(StatusMessage::error(format!(
-            "Failed to create session: {}",
+            "Failed to start session: {}",
             e
         )));
         return Ok(None);
-    }
-
-    // If there are post-create commands, run them then setup windows
-    if builder.has_post_create_commands() {
-        if let Err(e) = builder.run_post_create_then("twig project setup-windows") {
-            app.status_message = Some(StatusMessage::error(format!(
-                "Failed to start setup: {}",
-                e
-            )));
-            return Ok(None);
-        }
-    } else {
-        // No post-create commands, setup windows immediately
-        if let Err(e) = builder.setup_windows() {
-            app.status_message = Some(StatusMessage::error(format!(
-                "Failed to setup windows: {}",
-                e
-            )));
-            return Ok(None);
-        }
     }
 
     // Return action to start the worktree session
