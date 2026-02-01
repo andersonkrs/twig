@@ -1155,28 +1155,48 @@ fn handle_fork_worktree(
 
     // Show input overlay for branch name
     let title = format!("New worktree for '{}'", project_name);
-    let branch_name = match show_input_overlay(terminal, app, &title, "Enter branch name...")? {
-        Some(name) if !name.is_empty() => name,
-        _ => return Ok(None), // Cancelled or empty
-    };
+    let branch_name =
+        match show_input_overlay(terminal, app, &title, "Enter branch name or #PR...")? {
+            Some(name) if !name.trim().is_empty() => name,
+            _ => return Ok(None), // Cancelled or empty
+        };
 
-    // Show progress
-    app.status_message = Some(StatusMessage::info(format!(
-        "Creating '{}'...",
-        branch_name
-    )));
-    terminal.draw(|frame| app.render(frame))?;
+    let input = branch_name.trim().to_string();
+    let (worktree_path, branch_name) = if let Some(pr_number) = git::parse_pr_number(&input) {
+        app.status_message = Some(StatusMessage::info(format!(
+            "Fetching PR #{}...",
+            pr_number
+        )));
+        terminal.draw(|frame| app.render(frame))?;
 
-    // Create the git worktree
-    let worktree_path = match git::create_worktree(&project, &branch_name) {
-        Ok(path) => path,
-        Err(e) => {
-            app.status_message = Some(StatusMessage::error(format!(
-                "Failed to create worktree: {}",
-                e
-            )));
-            return Ok(None);
+        match git::create_worktree_from_pr(&project, pr_number) {
+            Ok(result) => (result.path, result.branch),
+            Err(e) => {
+                app.status_message = Some(StatusMessage::error(format!(
+                    "Failed to create worktree from PR: {}",
+                    e
+                )));
+                return Ok(None);
+            }
         }
+    } else {
+        // Show progress
+        app.status_message = Some(StatusMessage::info(format!("Creating '{}'...", input)));
+        terminal.draw(|frame| app.render(frame))?;
+
+        // Create the git worktree
+        let worktree_path = match git::create_worktree(&project, &input) {
+            Ok(path) => path,
+            Err(e) => {
+                app.status_message = Some(StatusMessage::error(format!(
+                    "Failed to create worktree: {}",
+                    e
+                )));
+                return Ok(None);
+            }
+        };
+
+        (worktree_path, input)
     };
 
     // Create and start tmux session for the worktree
