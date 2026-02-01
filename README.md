@@ -199,6 +199,30 @@ windows:
 
 ## How It Works
 
+Twig is a thin Rust layer that turns YAML configs into tmux control-mode commands and
+manages git worktrees when requested. The CLI orchestrates config loading, git worktree
+creation, and tmux session construction; the TUI only renders state and triggers CLI
+actions.
+
+```text
+YAML config
+   |
+   v
+CLI (twig) ---> git worktree ops (optional)
+   |
+   v
+tmux control mode -> tmux server -> sessions/windows/panes
+```
+
+```text
+User input (TUI)
+   |
+   v
+CLI commands -> tmux control mode
+```
+
+Tmux control protocol docs: https://man7.org/linux/man-pages/man1/tmux.1.html#CONTROL_MODE
+
 ### Sessions
 
 When you run `twig start <project>`:
