@@ -21,3 +21,13 @@ pre-push:
     build:
       run: cargo build --release
       fail_text: "Release build failed"
+
+ci:
+  parallel: false
+  commands:
+    fmt:
+      run: cargo fmt -- --check
+      fail_text: "Run 'cargo fmt' to fix formatting"
+    clippy:
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      fail_text: "Fix clippy warnings"

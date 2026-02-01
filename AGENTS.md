@@ -4,8 +4,8 @@
 
 **twig** is a tmux session manager with git worktree support, written in Rust.
 It manages tmux sessions based on YAML project configs, supports git worktrees with
-automatic file copying and post-create commands, and uses Charmbracelet Gum for
-interactive terminal UI.
+automatic file copying and post-create commands, and provides a TUI for interactive
+terminal workflows.
 
 ## Build/Lint/Test Commands
 
@@ -43,18 +43,21 @@ twig/
 │   │   ├── mod.rs
 │   │   ├── delete.rs
 │   │   ├── edit.rs
+│   │   ├── kill.rs
 │   │   ├── list.rs
 │   │   ├── new.rs
 │   │   ├── start.rs
-│   │   ├── stop.rs
+│   │   ├── tree_view.rs
+│   │   ├── window.rs
 │   │   └── worktree.rs
 │   ├── config/             # Configuration types
 │   │   ├── mod.rs
 │   │   ├── global.rs       # GlobalConfig
 │   │   └── project.rs      # Project, Window, Pane types
 │   ├── git.rs              # Git worktree operations
-│   ├── gum.rs              # Charmbracelet Gum wrapper
 │   └── tmux.rs             # Tmux session management
+│   ├── tmux_control.rs      # Low-level tmux control helpers
+│   └── ui.rs                # TUI rendering
 ├── Cargo.toml
 ├── rustfmt.toml            # Max width 100, 4 spaces
 ├── clippy.toml
@@ -194,7 +197,11 @@ mod tests {
 |-------|---------|
 | clap | CLI argument parsing (derive feature) |
 | serde + serde_yaml | YAML config serialization |
+| serde_json | JSON serialization |
 | anyhow | Error handling |
 | shellexpand | Path expansion (~) |
 | dirs | Standard directories |
 | regex + once_cell | Lazy static regex patterns |
+| ratatui + crossterm | Terminal UI rendering |
+| tui-tree-widget | Tree view UI component |
+| fuzzy-matcher | Fuzzy matching for search |
