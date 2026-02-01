@@ -2,6 +2,6 @@
 changelog_path = "CHANGELOG.md"
 
 [[package]]
-name = "twig"
+name = "twig-cli"
 changelog_path = "CHANGELOG.md"
 git_tag_name = "v{{ version }}"
