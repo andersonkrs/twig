@@ -12,10 +12,13 @@ mod ui;
 #[command(name = "twig")]
 #[command(about = "Tmux session manager with git worktree support")]
 #[command(
-    after_long_help = "Debug: set TWIG_DEBUG=1 to enable verbose tmux control output on stderr."
+    after_long_help = "Debug: use --verbose or set TWIG_DEBUG=1 to enable verbose tmux control output on stderr."
 )]
 #[command(version)]
 struct Cli {
+    /// Enable verbose tmux control output (sets TWIG_DEBUG=1)
+    #[arg(long, short, global = true)]
+    verbose: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -173,6 +176,10 @@ enum WindowCommands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if cli.verbose {
+        std::env::set_var("TWIG_DEBUG", "1");
+    }
 
     match cli.command {
         Commands::Start { project } => cli::start::run(project),

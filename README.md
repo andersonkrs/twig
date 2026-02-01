@@ -49,8 +49,8 @@ twig delete [project]    # Delete project config
 twig stop [project]      # Kill tmux session
 
 # Debug tmux control-mode I/O
-Setting `TWIG_DEBUG=1` enables verbose tmux control output on stderr.
-TWIG_DEBUG=1 twig window new [project] [name]
+Use `--verbose` (or `TWIG_DEBUG=1`) to enable verbose tmux control output on stderr.
+twig --verbose window new [project] [name]
 
 # Run a command in a window/pane
 twig run --project=dotfiles --window=6 --pane=1 -- whoami
