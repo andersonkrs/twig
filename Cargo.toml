@@ -1,6 +1,6 @@
 [package]
 name = "twig"
-version = "0.2.0"
+version = "0.1.2"
 edition = "2021"
 description = "Tmux session manager with git worktree support"
 license = "MIT"

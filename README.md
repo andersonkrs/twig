@@ -4,6 +4,15 @@ A tmux session manager with git worktree support, inspired by [tmuxinator](https
 
 Built to scratch my own itch. Terminal UI built with [Ratatui](https://ratatui.rs/).
 
+When you are juggling features, fixes, and reviews, [git worktree](https://git-scm.com/docs/git-worktree)
+lets you keep multiple branches checked out side by side. Twig ties each worktree to a tmux
+session and provides a snappy TUI so you can spin up a clean, focused workspace per branch in
+seconds.
+
+
+https://github.com/user-attachments/assets/95e21d30-a055-4c1b-b0b6-dcccb61dd53e
+
+
 ## Requirements
 
 - `tmux`
