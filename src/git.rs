@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -87,6 +88,58 @@ pub fn create_worktree(project: &Project, branch: &str) -> Result<PathBuf> {
     }
 
     Ok(worktree_path)
+}
+
+pub fn parse_pr_number(input: &str) -> Option<u64> {
+    let trimmed = input.trim();
+    let number = trimmed.strip_prefix('#')?;
+    if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+pub struct WorktreeFromPr {
+    pub path: PathBuf,
+    pub branch: String,
+}
+
+#[derive(Deserialize)]
+struct GhPrInfo {
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    #[serde(rename = "headRepository")]
+    head_repository: GhRepository,
+}
+
+#[derive(Deserialize)]
+struct GhRepository {
+    #[serde(rename = "nameWithOwner")]
+    name_with_owner: String,
+}
+
+#[derive(Deserialize)]
+struct GhRepoView {
+    #[serde(rename = "sshUrl")]
+    ssh_url: Option<String>,
+    url: Option<String>,
+}
+
+pub fn create_worktree_from_pr(project: &Project, pr_number: u64) -> Result<WorktreeFromPr> {
+    let project_root = project.root_expanded();
+    let pr_info = gh_pr_info(&project_root, pr_number)?;
+    let repo_url = gh_repo_clone_url(&project_root, &pr_info.head_repository.name_with_owner)?;
+    let branch_name = select_pr_branch_name(&project_root, pr_number, &pr_info.head_ref_name)?;
+
+    fetch_pr_branch(&project_root, &repo_url, &pr_info.head_ref_name)?;
+    create_local_branch_from_fetch(&project_root, &branch_name)?;
+
+    let path = create_worktree(project, &branch_name)?;
+
+    Ok(WorktreeFromPr {
+        path,
+        branch: branch_name,
+    })
 }
 
 /// Delete a git worktree and its local branch
@@ -237,6 +290,103 @@ fn check_branch_exists(repo_path: &Path, branch: &str) -> Result<bool> {
     Ok(remote.status.success())
 }
 
+fn gh_pr_info(repo_path: &Path, pr_number: u64) -> Result<GhPrInfo> {
+    let output = Command::new("gh")
+        .current_dir(repo_path)
+        .args([
+            "pr",
+            "view",
+            &pr_number.to_string(),
+            "--json",
+            "headRefName,headRepository",
+        ])
+        .output()
+        .context("Failed to run gh pr view")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("gh pr view failed: {}", stderr.trim());
+    }
+
+    let info: GhPrInfo =
+        serde_json::from_slice(&output.stdout).context("Failed to parse gh pr view output")?;
+    Ok(info)
+}
+
+fn gh_repo_clone_url(repo_path: &Path, name_with_owner: &str) -> Result<String> {
+    let output = Command::new("gh")
+        .current_dir(repo_path)
+        .args(["repo", "view", name_with_owner, "--json", "sshUrl,url"])
+        .output()
+        .context("Failed to run gh repo view")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("gh repo view failed: {}", stderr.trim());
+    }
+
+    let info: GhRepoView =
+        serde_json::from_slice(&output.stdout).context("Failed to parse gh repo view output")?;
+    if let Some(url) = info.ssh_url.or(info.url) {
+        if !url.is_empty() {
+            return Ok(url);
+        }
+    }
+
+    anyhow::bail!("gh repo view returned empty clone url")
+}
+
+fn select_pr_branch_name(repo_path: &Path, pr_number: u64, head_ref_name: &str) -> Result<String> {
+    let primary = format!("pr-{}", pr_number);
+    if !check_branch_exists(repo_path, &primary)? {
+        return Ok(primary);
+    }
+
+    let base = format!("pr-{}-{}", pr_number, head_ref_name);
+    if !check_branch_exists(repo_path, &base)? {
+        return Ok(base);
+    }
+
+    for idx in 2..=50 {
+        let candidate = format!("{}-{}", base, idx);
+        if !check_branch_exists(repo_path, &candidate)? {
+            return Ok(candidate);
+        }
+    }
+
+    anyhow::bail!("Unable to find available branch name for PR #{}", pr_number)
+}
+
+fn fetch_pr_branch(repo_path: &Path, repo_url: &str, head_ref_name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["fetch", repo_url, head_ref_name])
+        .output()
+        .context("Failed to fetch PR branch")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git fetch failed: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
+fn create_local_branch_from_fetch(repo_path: &Path, branch_name: &str) -> Result<()> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["branch", branch_name, "FETCH_HEAD"])
+        .output()
+        .context("Failed to create local branch from fetched PR")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git branch failed: {}", stderr.trim());
+    }
+
+    Ok(())
+}
+
 /// Get the default branch (main or master) for a repository
 pub fn get_default_branch(repo_path: &Path) -> Result<String> {
     // Try to get from remote HEAD
@@ -363,4 +513,18 @@ fn create_symlink(target: &Path, link: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn create_symlink(_target: &Path, _link: &Path) -> Result<()> {
     anyhow::bail!("Symlink copying is only supported on Unix systems")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_pr_number() {
+        assert_eq!(parse_pr_number("#123"), Some(123));
+        assert_eq!(parse_pr_number(" #42 "), Some(42));
+        assert_eq!(parse_pr_number("#"), None);
+        assert_eq!(parse_pr_number("#abc"), None);
+        assert_eq!(parse_pr_number("123"), None);
+    }
 }
