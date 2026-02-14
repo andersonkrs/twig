@@ -5,8 +5,8 @@ _.file = { path = ".env" }
 rust = { version = "stable", postinstall = "mise exec -- rustup component add clippy rustfmt rust-analyzer" }
 lefthook = "latest"
 
-[hooks.postinstall]
-run = "lefthook install"
+[hooks]
+postinstall = "lefthook install"
 
 [tasks.install]
 run = "cargo install --path . --bin twig --locked --force"
