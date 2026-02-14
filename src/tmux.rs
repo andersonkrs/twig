@@ -3,40 +3,63 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::config::{Project, Window};
+use crate::debug_log;
 use crate::tmux_control::ControlClient;
 
 const SETUP_WINDOW_NAME: &str = "setup-twig";
 const WORKTREE_SESSION_PREFIX: &str = "__";
 
+fn run_tmux_command(args: &[&str], context: &str) -> Result<std::process::Output> {
+    debug_log::log_tmux_command(args);
+
+    let output = match Command::new("tmux").args(args).output() {
+        Ok(output) => output,
+        Err(err) => {
+            debug_log::log_tmux_command_failure(args, &err.to_string());
+            anyhow::bail!("{}: {}", context, err);
+        }
+    };
+
+    debug_log::log_tmux_command_result(
+        args,
+        output.status.code().unwrap_or(-1),
+        &output.stdout,
+        &output.stderr,
+    );
+
+    Ok(output)
+}
+
 /// Check if a tmux session exists
 pub fn session_exists(name: &str) -> Result<bool> {
-    let output = Command::new("tmux")
-        .args(["has-session", "-t", name])
-        .output()
-        .context("Failed to check tmux session")?;
+    let output = run_tmux_command(
+        ["has-session", "-t", name].as_ref(),
+        "Failed to check tmux session",
+    )?;
 
     Ok(output.status.success())
 }
 
 /// Check if a tmux session exists on a specific socket
 pub fn session_exists_with_socket(name: &str, socket_path: &str) -> Result<bool> {
-    let output = Command::new("tmux")
-        .args(["-S", socket_path, "has-session", "-t", name])
-        .output()
-        .context("Failed to check tmux session")?;
+    let output = run_tmux_command(
+        ["-S", socket_path, "has-session", "-t", name].as_ref(),
+        "Failed to check tmux session",
+    )?;
 
     Ok(output.status.success())
 }
 
 /// Attach to an existing tmux session
 pub fn attach_session(name: &str) -> Result<()> {
-    let status = Command::new("tmux")
-        .args(["attach-session", "-t", name])
-        .status()
-        .context("Failed to attach to tmux session")?;
+    let status = run_tmux_command(
+        ["attach-session", "-t", name].as_ref(),
+        "Failed to attach to tmux session",
+    )?
+    .status;
 
     if !status.success() {
         anyhow::bail!("Failed to attach to session: {}", name);
@@ -47,10 +70,11 @@ pub fn attach_session(name: &str) -> Result<()> {
 
 /// Switch to a tmux session (when already inside tmux)
 pub fn switch_client(name: &str) -> Result<()> {
-    let status = Command::new("tmux")
-        .args(["switch-client", "-t", name])
-        .status()
-        .context("Failed to switch tmux client")?;
+    let status = run_tmux_command(
+        ["switch-client", "-t", name].as_ref(),
+        "Failed to switch tmux client",
+    )?
+    .status;
 
     if !status.success() {
         anyhow::bail!("Failed to switch to session: {}", name);
@@ -70,10 +94,11 @@ pub fn current_session_name() -> Option<String> {
         return None;
     }
 
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", "#{session_name}"])
-        .output()
-        .ok()?;
+    let output = run_tmux_command(
+        ["display-message", "-p", "#{session_name}"].as_ref(),
+        "Failed to get tmux session name",
+    )
+    .ok()?;
 
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -88,10 +113,11 @@ pub fn current_window_name() -> Option<String> {
         return None;
     }
 
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", "#{window_name}"])
-        .output()
-        .ok()?;
+    let output = run_tmux_command(
+        ["display-message", "-p", "#{window_name}"].as_ref(),
+        "Failed to get tmux window name",
+    )
+    .ok()?;
 
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -102,16 +128,18 @@ pub fn current_window_name() -> Option<String> {
 
 /// Get the current tmux session name for a specific socket
 pub fn current_session_name_with_socket(socket_path: &str) -> Option<String> {
-    let output = Command::new("tmux")
-        .args([
+    let output = run_tmux_command(
+        [
             "-S",
             socket_path,
             "display-message",
             "-p",
             "#{session_name}",
-        ])
-        .output()
-        .ok()?;
+        ]
+        .as_ref(),
+        "Failed to get tmux session name from socket",
+    )
+    .ok()?;
 
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -122,10 +150,11 @@ pub fn current_session_name_with_socket(socket_path: &str) -> Option<String> {
 
 /// Get the current tmux window name for a specific socket
 pub fn current_window_name_with_socket(socket_path: &str) -> Option<String> {
-    let output = Command::new("tmux")
-        .args(["-S", socket_path, "display-message", "-p", "#{window_name}"])
-        .output()
-        .ok()?;
+    let output = run_tmux_command(
+        ["-S", socket_path, "display-message", "-p", "#{window_name}"].as_ref(),
+        "Failed to get tmux window name from socket",
+    )
+    .ok()?;
 
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -136,10 +165,7 @@ pub fn current_window_name_with_socket(socket_path: &str) -> Option<String> {
 
 /// Detach from current tmux session
 pub fn detach() -> Result<()> {
-    Command::new("tmux")
-        .arg("detach-client")
-        .status()
-        .context("Failed to detach from tmux")?;
+    let _ = run_tmux_command(["detach-client"].as_ref(), "Failed to detach from tmux")?;
     Ok(())
 }
 
@@ -171,10 +197,10 @@ pub fn safe_kill_session(name: &str) -> Result<()> {
 
 /// List all tmux sessions
 pub fn list_sessions() -> Result<Vec<String>> {
-    let output = Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .context("Failed to list tmux sessions")?;
+    let output = run_tmux_command(
+        ["list-sessions", "-F", "#{session_name}"].as_ref(),
+        "Failed to list tmux sessions",
+    )?;
 
     if output.status.success() {
         let sessions = String::from_utf8(output.stdout)?
@@ -620,10 +646,11 @@ impl SessionBuilder {
 
 /// Get tmux base-index setting (default is 0, but users often set to 1)
 fn get_base_index() -> u32 {
-    let output = Command::new("tmux")
-        .args(["show-option", "-gv", "base-index"])
-        .output()
-        .ok();
+    let output = run_tmux_command(
+        ["show-option", "-gv", "base-index"].as_ref(),
+        "Failed to read tmux base-index",
+    )
+    .ok();
 
     output
         .and_then(|o| String::from_utf8(o.stdout).ok())

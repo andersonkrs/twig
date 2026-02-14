@@ -3,6 +3,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use anyhow::{Context, Result};
 
+use crate::debug_log;
+
 pub struct ControlClient {
     child: Child,
     stdin: ChildStdin,
@@ -15,6 +17,15 @@ impl ControlClient {
         if let Some(socket) = server {
             command.args(["-L", socket]);
         }
+
+        let debug_args = match server {
+            Some(socket) => vec!["tmux", "-L", socket, "-C"],
+            None => vec!["tmux", "-C"],
+        };
+        debug_log::log_tmux_control(
+            "launch",
+            &format!("{} {}", debug_args[0], debug_args[1..].join(" ")),
+        );
 
         let mut child = command
             .arg("-C")
@@ -44,6 +55,11 @@ impl ControlClient {
         let mut command = Command::new("tmux");
         command.args(["-S", socket_path]);
 
+        debug_log::log_tmux_control(
+            "launch",
+            &format!("tmux -S {} -C", quote_tmux_arg(socket_path)),
+        );
+
         let mut child = command
             .arg("-C")
             .stdin(Stdio::piped())
@@ -69,6 +85,7 @@ impl ControlClient {
     }
 
     pub fn command(&mut self, cmd: &str) -> Result<Vec<String>> {
+        debug_log::log_tmux_control(">>", cmd);
         if debug_enabled() {
             eprintln!("[tmux-control] >> {}", cmd);
         }
@@ -92,6 +109,8 @@ impl ControlClient {
             }
 
             let trimmed = line.trim_end_matches(['\r', '\n']);
+
+            debug_log::log_tmux_control("<<", trimmed);
 
             if debug_enabled() {
                 eprintln!("[tmux-control] << {}", trimmed);
@@ -143,6 +162,8 @@ impl ControlClient {
             eprintln!("[tmux-control] >> {}", cmd);
             eprintln!("[tmux-control] >> {}", sentinel_cmd);
         }
+        debug_log::log_tmux_control(">>", cmd);
+        debug_log::log_tmux_control(">>", &sentinel_cmd);
 
         writeln!(self.stdin, "{}", cmd).context("Failed to write tmux control command")?;
         writeln!(self.stdin, "{}", sentinel_cmd)
@@ -170,6 +191,8 @@ impl ControlClient {
             }
 
             let trimmed = line.trim_end_matches(['\r', '\n']);
+
+            debug_log::log_tmux_control("<<", trimmed);
 
             if debug_enabled() {
                 eprintln!("[tmux-control] << {}", trimmed);

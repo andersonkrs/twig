@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod cli;
 mod config;
+mod debug_log;
 mod git;
 mod tmux;
 mod tmux_control;
@@ -12,7 +13,8 @@ mod ui;
 #[command(name = "twig")]
 #[command(about = "Tmux session manager with git worktree support")]
 #[command(
-    after_long_help = "Debug: use --verbose or set TWIG_DEBUG=1 to enable verbose tmux control output on stderr."
+    after_long_help = "Debug: use --verbose or set TWIG_DEBUG=1 for verbose tmux control output on stderr.\n\
+Twig also writes tmux command logs to $TWIG_LOG_FILE when set, otherwise /tmp/twig/twig.log."
 )]
 #[command(version)]
 struct Cli {
