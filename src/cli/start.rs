@@ -16,6 +16,7 @@ pub fn run(project_name: Option<String>) -> Result<()> {
     // Check if session already exists
     if tmux::session_exists(&project.name)? {
         println!("Session '{}' already exists, attaching...", project.name);
+        tmux::handoff_project_windows(&project, &project.name)?;
         tmux::connect_to_session(&project.name)?;
         return Ok(());
     }
@@ -29,6 +30,7 @@ pub fn run(project_name: Option<String>) -> Result<()> {
     // Create session, run post-create, then setup windows via control mode
     println!("Starting session '{}'...", project.name);
     builder.start_with_control()?;
+    tmux::handoff_project_windows(&project, &project.name)?;
 
     // Connect to the session
     tmux::connect_to_session(&project.name)?;

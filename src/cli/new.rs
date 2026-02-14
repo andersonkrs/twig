@@ -67,6 +67,10 @@ windows:
 #   post_create:
 #     - bundle install
 #     - yarn install
+#   # Optional: pause these windows when switching sessions in this project
+#   handoff_windows:
+#     - rails
+#     - sidekiq
 "#,
             project_name, root, url
         )
@@ -93,6 +97,10 @@ windows:
 #   post_create:
 #     - bundle install
 #     - yarn install
+#   # Optional: pause these windows when switching sessions in this project
+#   handoff_windows:
+#     - rails
+#     - sidekiq
 "#,
             project_name, root
         )

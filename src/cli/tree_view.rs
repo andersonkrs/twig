@@ -1102,11 +1102,13 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
         SelectedAction::StartProject(name) => {
             let project = Project::load(&name)?;
             if tmux::session_exists(&project.name)? {
+                tmux::handoff_project_windows(&project, &project.name)?;
                 return Ok(project.name);
             }
 
             project.clone_if_needed()?;
             SessionBuilder::new(&project).start_with_control()?;
+            tmux::handoff_project_windows(&project, &project.name)?;
             Ok(project.name)
         }
         SelectedAction::StartWorktree { project, branch } => {
@@ -1114,6 +1116,7 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
             let session_name = config.worktree_session_name(&branch);
 
             if tmux::session_exists(&session_name)? {
+                tmux::handoff_project_windows(&config, &session_name)?;
                 return Ok(session_name);
             }
 
@@ -1128,6 +1131,8 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
                 .with_root(worktree.path.to_string_lossy().to_string())
                 .with_worktree(branch)
                 .start_with_control()?;
+
+            tmux::handoff_project_windows(&config, &session_name)?;
 
             Ok(session_name)
         }
@@ -1204,6 +1209,7 @@ fn handle_fork_worktree(
 
     // Check if session already exists (unlikely but possible)
     if tmux::session_exists(&session_name)? {
+        tmux::handoff_project_windows(&project, &session_name)?;
         app.status_message = Some(StatusMessage::info(format!(
             "Session '{}' already exists",
             session_name
@@ -1227,6 +1233,8 @@ fn handle_fork_worktree(
         )));
         return Ok(None);
     }
+
+    tmux::handoff_project_windows(&project, &session_name)?;
 
     // Return action to start the worktree session
     Ok(Some(SelectedAction::StartWorktree {

@@ -356,7 +356,7 @@ impl ControlClient {
             "list-panes -t {} -F {}",
             quote_tmux_arg(target),
             quote_tmux_arg(
-                "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}"
+                "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_pid}"
             )
         );
         self.command_with_output(&command)

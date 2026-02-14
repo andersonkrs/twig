@@ -5,6 +5,10 @@ edition = "2021"
 description = "Tmux session manager with git worktree support"
 license = "MIT"
 
+[[bin]]
+name = "twig"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

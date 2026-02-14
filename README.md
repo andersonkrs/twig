@@ -149,6 +149,11 @@ worktree:
     - yarn install
     - rails db:migrate
 
+  # Optional: pause commands in these windows when switching between
+  # any session for this project (including main and worktrees).
+  handoff_windows:
+    - rails
+
   # Note: post_create runs inside a temporary setup window in the worktree session
   # so your shell init and environment (mise/rbenv/etc) are applied.
 ```
@@ -185,6 +190,11 @@ worktree:
     - bundle install
     - yarn install
     - bin/rails db:prepare
+
+  # Optional: pause commands in these windows when switching between
+  # any session for this project (including main and worktrees).
+  handoff_windows:
+    - rails
 ```
 
 **Simple project:**

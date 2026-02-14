@@ -93,6 +93,12 @@ pub struct WorktreeConfig {
     /// Commands to run after creating the worktree
     #[serde(default)]
     pub post_create: Vec<String>,
+
+    /// Windows to hand off when switching between any project sessions
+    /// Commands in these windows are paused in other sessions and restarted
+    /// in the target session.
+    #[serde(default)]
+    pub handoff_windows: Vec<String>,
 }
 
 impl Project {
@@ -228,6 +234,14 @@ impl Project {
     pub fn is_git_url(s: &str) -> bool {
         GIT_URL_VALIDATOR.is_match(s.trim())
     }
+
+    /// Windows that should be handoff-managed when switching project sessions.
+    pub fn worktree_handoff_windows(&self) -> Vec<String> {
+        self.worktree
+            .as_ref()
+            .map(|worktree| worktree.handoff_windows.clone())
+            .unwrap_or_default()
+    }
 }
 
 impl Window {
@@ -286,6 +300,46 @@ impl Pane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_worktree_config_default_handoff_windows() {
+        let config: WorktreeConfig = serde_yaml::from_str(r#"copy: []"#).unwrap();
+        assert!(config.handoff_windows.is_empty());
+        assert!(config.copy.is_empty());
+    }
+
+    #[test]
+    fn test_worktree_config_handoff_windows() {
+        let project_yaml = r#"
+name: demo
+root: /tmp/demo
+windows:
+  - shell:
+worktree:
+  handoff_windows:
+    - rails
+    - sidekiq
+"#;
+
+        let project: Project = serde_yaml::from_str(project_yaml).unwrap();
+        assert_eq!(project.worktree_handoff_windows(), vec!["rails", "sidekiq"]);
+    }
+
+    #[test]
+    fn test_worktree_session_handoff_windows_are_optional() {
+        let project_yaml = r#"
+name: demo
+root: /tmp/demo
+windows:
+  - shell:
+worktree:
+  copy:
+    - .env
+"#;
+
+        let project: Project = serde_yaml::from_str(project_yaml).unwrap();
+        assert!(project.worktree_handoff_windows().is_empty());
+    }
 
     #[test]
     fn test_name_from_https_url() {

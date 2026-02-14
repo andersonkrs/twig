@@ -9,6 +9,7 @@ use crate::config::{Project, Window};
 use crate::tmux_control::ControlClient;
 
 const SETUP_WINDOW_NAME: &str = "setup-twig";
+const WORKTREE_SESSION_PREFIX: &str = "__";
 
 /// Check if a tmux session exists
 pub fn session_exists(name: &str) -> Result<bool> {
@@ -185,6 +186,256 @@ pub fn list_sessions() -> Result<Vec<String>> {
         // No sessions exist
         Ok(vec![])
     }
+}
+
+/// Get the project name from a worktree session name
+fn worktree_project_name(session_name: &str) -> Option<&str> {
+    session_name
+        .split_once(WORKTREE_SESSION_PREFIX)
+        .map(|(project, _)| project)
+}
+
+/// Check if a session name belongs to a worktree session for the given project
+fn is_worktree_session_for_project(session_name: &str, project_name: &str) -> bool {
+    worktree_project_name(session_name).is_some_and(|project| project == project_name)
+}
+
+fn is_project_session(project_name: &str, session_name: &str) -> bool {
+    session_name == project_name || is_worktree_session_for_project(session_name, project_name)
+}
+
+/// List running worktree sessions for a project.
+#[allow(dead_code)]
+pub fn running_worktree_sessions_for_project(project_name: &str) -> Result<Vec<String>> {
+    let sessions = list_sessions()?;
+
+    Ok(sessions
+        .into_iter()
+        .filter(|session_name| is_worktree_session_for_project(session_name, project_name))
+        .collect())
+}
+
+/// List all running sessions for a project, including the main session and all worktrees.
+pub fn running_project_sessions(project_name: &str) -> Result<Vec<String>> {
+    let sessions = list_sessions()?;
+
+    Ok(sessions
+        .into_iter()
+        .filter(|session_name| is_project_session(project_name, session_name))
+        .collect())
+}
+
+/// Pause configured handoff windows in every other session for this project,
+/// then restart those windows in the target session.
+pub fn handoff_project_windows(project: &Project, target_session: &str) -> Result<()> {
+    let handoff_windows = project.worktree_handoff_windows();
+    if handoff_windows.is_empty() {
+        return Ok(());
+    }
+
+    let sessions = running_project_sessions(&project.name)?;
+    if sessions.is_empty() {
+        return Ok(());
+    }
+
+    let mut client = ControlClient::connect(None)?;
+    let mut first_error: Option<anyhow::Error> = None;
+
+    let configured_windows: Vec<(&str, Vec<String>)> = handoff_windows
+        .iter()
+        .filter_map(|window_name| {
+            let commands = commands_for_window(&project.windows, window_name);
+            if commands.is_empty() {
+                None
+            } else {
+                Some((window_name.as_str(), commands))
+            }
+        })
+        .collect();
+
+    if configured_windows.is_empty() {
+        return Ok(());
+    }
+
+    for session_name in sessions {
+        let session_windows = match client.list_windows(&session_name) {
+            Ok(windows) => windows,
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+                continue;
+            }
+        };
+
+        let is_target = session_name == target_session;
+
+        for (window_name, commands) in &configured_windows {
+            if !session_windows.iter().any(|name| name == window_name) {
+                continue;
+            }
+
+            let pane_target = format!("{}:{}", session_name, window_name);
+            let panes = match client.list_panes(&pane_target) {
+                Ok(panes) => panes,
+                Err(err) => {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                    continue;
+                }
+            };
+
+            let pane_infos = parse_pane_infos(&panes);
+            if pane_infos.is_empty() {
+                continue;
+            }
+
+            let pane_indices: Vec<u32> = pane_infos.iter().map(|pane| pane.index).collect();
+
+            for pane in &pane_infos {
+                let target = format!("{}:{}.{}", session_name, window_name, pane.index);
+
+                if let Some(pid) = pane.pid {
+                    let _ = send_pane_interrupt_signal(&mut client, pid);
+                }
+
+                let stop_token = handoff_stop_token(&session_name, window_name, pane.index);
+                if let Err(err) = client.send_keys(&target, "C-c", false) {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                    break;
+                }
+
+                let stop_signal = handoff_stop_signal(&stop_token);
+                if let Err(err) = client.send_keys(&target, &stop_signal, true) {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                    break;
+                }
+            }
+
+            if is_target {
+                for (command_index, command) in commands.iter().enumerate() {
+                    if command_index >= pane_indices.len() {
+                        break;
+                    }
+
+                    let pane_target = format!(
+                        "{}:{}.{}",
+                        session_name, window_name, pane_indices[command_index]
+                    );
+
+                    if let Err(err) = client.send_keys(&pane_target, command, true) {
+                        if first_error.is_none() {
+                            first_error = Some(err);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(error) = first_error {
+        anyhow::bail!("Failed to apply worktree handoff: {}", error);
+    }
+
+    Ok(())
+}
+
+fn handoff_stop_token(session_name: &str, window_name: &str, pane_index: u32) -> String {
+    format!("twig-handoff-stop:{session_name}:{window_name}:{pane_index}")
+}
+
+fn commands_for_window(windows: &[Window], window_name: &str) -> Vec<String> {
+    let Some(window) = windows.iter().find(|window| window.name() == window_name) else {
+        return vec![];
+    };
+
+    if let Some(cmd) = window.simple_command() {
+        let trimmed = cmd.trim();
+        if trimmed.is_empty() {
+            return vec![];
+        }
+        return vec![trimmed.to_string()];
+    }
+
+    window
+        .panes()
+        .into_iter()
+        .filter_map(|pane| pane.command().map(|command| command.trim().to_string()))
+        .filter(|command| !command.is_empty())
+        .collect()
+}
+
+fn parse_pane_infos(lines: &[String]) -> Vec<PaneInfo> {
+    let mut panes = Vec::new();
+
+    for line in lines {
+        let mut parts = line.split('\t');
+        let index = match parts.next() {
+            Some(index) => index.trim().parse::<u32>().ok(),
+            None => None,
+        };
+
+        if let Some(index) = index {
+            let pid = parts
+                .nth(3)
+                .and_then(|value| value.trim().parse::<u32>().ok());
+            panes.push(PaneInfo { index, pid });
+        }
+    }
+
+    panes.sort_unstable_by_key(|pane| pane.index);
+    panes
+}
+
+#[derive(Debug)]
+struct PaneInfo {
+    index: u32,
+    pid: Option<u32>,
+}
+
+fn handoff_stop_signal(stop_token: &str) -> String {
+    format!("tmux wait-for -S {}", stop_token)
+}
+
+fn send_pane_interrupt_signal(client: &mut ControlClient, pane_pid: u32) -> Result<()> {
+    client.command(&format!("run-shell -b \"kill -s SIGINT {}\"", pane_pid))?;
+    Ok(())
+}
+
+/// Kill all running worktree sessions for a project except the given session.
+#[allow(dead_code)]
+pub fn kill_other_worktree_sessions_for_project(
+    project_name: &str,
+    keep_session: &str,
+) -> Result<()> {
+    let mut target_sessions = running_worktree_sessions_for_project(project_name)?;
+    target_sessions.retain(|name| name != keep_session);
+
+    let mut first_error: Option<anyhow::Error> = None;
+
+    for session_name in target_sessions {
+        if !session_exists(&session_name)? {
+            continue;
+        }
+
+        if let Err(err) = safe_kill_session(&session_name) {
+            if session_exists(&session_name)? && first_error.is_none() {
+                first_error = Some(err);
+            }
+        }
+    }
+
+    if let Some(error) = first_error {
+        anyhow::bail!("Failed to stop other worktree sessions: {}", error);
+    }
+
+    Ok(())
 }
 
 /// Builder for creating tmux sessions
@@ -412,5 +663,32 @@ pub fn connect_to_session(name: &str) -> Result<()> {
         switch_client(name)
     } else {
         attach_session(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_worktree_project_name() {
+        assert_eq!(
+            worktree_project_name("myproject__feature-auth"),
+            Some("myproject")
+        );
+        assert_eq!(worktree_project_name("myproject"), None);
+    }
+
+    #[test]
+    fn test_is_worktree_session_for_project() {
+        assert!(is_worktree_session_for_project(
+            "myproject__feature-auth",
+            "myproject"
+        ));
+        assert!(!is_worktree_session_for_project(
+            "other__feature-auth",
+            "myproject"
+        ));
+        assert!(!is_worktree_session_for_project("myproject", "myproject"));
     }
 }

@@ -7,3 +7,6 @@ lefthook = "latest"
 
 [hooks.postinstall]
 run = "lefthook install"
+
+[tasks.install]
+run = "cargo install --path . --bin twig --locked --force"
