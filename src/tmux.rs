@@ -1,4 +1,5 @@
-use std::io::{stdout, IsTerminal};
+use std::env;
+use std::io::{stderr, stdin, stdout, IsTerminal};
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread::sleep;
@@ -56,18 +57,21 @@ pub fn session_exists_with_socket(name: &str, socket_path: &str) -> Result<bool>
 
 /// Attach to an existing tmux session
 pub fn attach_session(name: &str) -> Result<()> {
-    let output = run_tmux_command(
-        ["attach-session", "-t", name].as_ref(),
-        "Failed to attach to tmux session",
-    )?;
+    let args = ["attach-session", "-t", name];
+    debug_log::log_tmux_command(&args);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            anyhow::bail!("Failed to attach to session: {}", name);
+    let status = match Command::new("tmux").args(args).status() {
+        Ok(status) => status,
+        Err(err) => {
+            debug_log::log_tmux_command_failure(&args, &err.to_string());
+            anyhow::bail!("Failed to attach to tmux session: {}", err);
         }
+    };
 
-        anyhow::bail!("Failed to attach to session '{}': {}", name, stderr);
+    debug_log::log_tmux_command_result(&args, status.code().unwrap_or(-1), &[], &[]);
+
+    if !status.success() {
+        anyhow::bail!("Failed to attach to session: {}", name);
     }
 
     Ok(())
@@ -91,6 +95,36 @@ pub fn switch_client(name: &str) -> Result<()> {
 /// Check if we're inside a tmux session
 pub fn inside_tmux() -> bool {
     std::env::var("TMUX").is_ok()
+}
+
+fn attach_blockers(
+    stdin_is_terminal: bool,
+    stdout_is_terminal: bool,
+    stderr_is_terminal: bool,
+    term: Option<&str>,
+) -> Vec<&'static str> {
+    let mut blockers = Vec::new();
+
+    if !stdin_is_terminal {
+        blockers.push("stdin is not a terminal");
+    }
+
+    if !stdout_is_terminal {
+        blockers.push("stdout is not a terminal");
+    }
+
+    if !stderr_is_terminal {
+        blockers.push("stderr is not a terminal");
+    }
+
+    match term {
+        None => blockers.push("TERM is not set"),
+        Some(value) if value.trim().is_empty() => blockers.push("TERM is empty"),
+        Some("dumb") => blockers.push("TERM is dumb"),
+        Some(_) => {}
+    }
+
+    blockers
 }
 
 /// Get the current tmux session name (if inside tmux)
@@ -703,13 +737,28 @@ fn kill_session_with_timeout(name: &str, timeout: Duration) -> Result<()> {
 /// Connect to a session (attach or switch depending on context)
 pub fn connect_to_session(name: &str) -> Result<()> {
     if inside_tmux() {
-        switch_client(name)
-    } else if stdout().is_terminal() {
+        return switch_client(name);
+    }
+
+    let term = env::var("TERM").ok();
+    let blockers = attach_blockers(
+        stdin().is_terminal(),
+        stdout().is_terminal(),
+        stderr().is_terminal(),
+        term.as_deref(),
+    );
+
+    if blockers.is_empty() {
         attach_session(name)
     } else {
+        let reason = blockers.join(", ");
+        debug_log::log_tmux_control(
+            "!!",
+            &format!("skip attach-session for {}: {}", name, reason),
+        );
         eprintln!(
-            "Session '{}' is ready, but twig cannot attach because stdout is not a terminal. Run `tmux attach-session -t {}` from an interactive terminal.",
-            name, name
+            "Session '{}' is ready, but twig cannot attach ({reason}). Run `tmux attach-session -t {}` from an interactive terminal.",
+            name, name,
         );
         Ok(())
     }
@@ -739,5 +788,29 @@ mod tests {
             "myproject"
         ));
         assert!(!is_worktree_session_for_project("myproject", "myproject"));
+    }
+
+    #[test]
+    fn test_attach_blockers_for_interactive_terminal() {
+        let blockers = attach_blockers(true, true, true, Some("xterm-256color"));
+        assert!(blockers.is_empty());
+    }
+
+    #[test]
+    fn test_attach_blockers_for_non_interactive_stdio() {
+        let blockers = attach_blockers(false, true, false, Some("xterm-256color"));
+        assert_eq!(
+            blockers,
+            vec!["stdin is not a terminal", "stderr is not a terminal"]
+        );
+    }
+
+    #[test]
+    fn test_attach_blockers_for_bad_term() {
+        let blockers = attach_blockers(true, true, true, Some("dumb"));
+        assert_eq!(blockers, vec!["TERM is dumb"]);
+
+        let blockers = attach_blockers(true, true, true, None);
+        assert_eq!(blockers, vec!["TERM is not set"]);
     }
 }
