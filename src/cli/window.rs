@@ -185,6 +185,40 @@ pub fn run(
     Ok(())
 }
 
+pub fn activate(project_name: Option<String>, tree: Option<String>) -> Result<()> {
+    let tree_name = tree.or_else(|| env::var("TWIG_WORKTREE").ok());
+    let env_project = env::var("TWIG_PROJECT").ok();
+
+    let name = if let Some(ref n) = project_name {
+        n.clone()
+    } else if let Some(ref n) = env_project {
+        n.clone()
+    } else {
+        anyhow::bail!("No project selected; set --project or TWIG_PROJECT");
+    };
+
+    if tree_name.is_some() && project_name.is_none() && env_project.is_none() {
+        anyhow::bail!("--tree requires --project when TWIG_PROJECT is not set");
+    }
+
+    let project = Project::load(&name)?;
+    let session_name = if let Some(ref tree_name) = tree_name {
+        project.worktree_session_name(tree_name)
+    } else {
+        name.clone()
+    };
+
+    if !tmux::session_exists(&session_name)? {
+        anyhow::bail!("Session '{}' is not running", session_name);
+    }
+
+    tmux::handoff_project_windows(&project, &session_name)?;
+
+    println!("Activated handoff windows for session '{}'", session_name);
+
+    Ok(())
+}
+
 pub fn list_panes(
     project_name: Option<String>,
     window: String,

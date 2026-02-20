@@ -67,7 +67,7 @@ windows:
 #   post_create:
 #     - bundle install
 #     - yarn install
-#   # Optional: pause these windows when switching sessions in this project
+#   # Optional: pause/resume these windows when running `twig window activate`
 #   handoff_windows:
 #     - rails
 #     - sidekiq
@@ -97,7 +97,7 @@ windows:
 #   post_create:
 #     - bundle install
 #     - yarn install
-#   # Optional: pause these windows when switching sessions in this project
+#   # Optional: pause/resume these windows when running `twig window activate`
 #   handoff_windows:
 #     - rails
 #     - sidekiq

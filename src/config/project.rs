@@ -235,7 +235,7 @@ impl Project {
         GIT_URL_VALIDATOR.is_match(s.trim())
     }
 
-    /// Windows that should be handoff-managed when switching project sessions.
+    /// Windows that should be handoff-managed when manually activating a project session.
     pub fn worktree_handoff_windows(&self) -> Vec<String> {
         self.worktree
             .as_ref()

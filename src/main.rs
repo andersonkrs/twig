@@ -159,6 +159,17 @@ enum WindowCommands {
         socket: Option<String>,
     },
 
+    /// Activate handoff-managed windows on a session
+    #[command(alias = "a")]
+    Activate {
+        /// Project/session name (defaults to TWIG_PROJECT when set)
+        #[arg(long)]
+        project: Option<String>,
+        /// Worktree branch name (defaults to TWIG_WORKTREE when set)
+        #[arg(long)]
+        tree: Option<String>,
+    },
+
     /// List panes for a window
     #[command(alias = "lp")]
     ListPanes {
@@ -210,6 +221,7 @@ fn main() -> Result<()> {
                 name,
                 socket,
             } => cli::window::new(project, name, socket),
+            WindowCommands::Activate { project, tree } => cli::window::activate(project, tree),
             WindowCommands::ListPanes {
                 window,
                 project,

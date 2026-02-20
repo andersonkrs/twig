@@ -1,3 +1,4 @@
+use std::io::{stdout, IsTerminal};
 use std::path::PathBuf;
 use std::process::Command;
 use std::thread::sleep;
@@ -55,14 +56,18 @@ pub fn session_exists_with_socket(name: &str, socket_path: &str) -> Result<bool>
 
 /// Attach to an existing tmux session
 pub fn attach_session(name: &str) -> Result<()> {
-    let status = run_tmux_command(
+    let output = run_tmux_command(
         ["attach-session", "-t", name].as_ref(),
         "Failed to attach to tmux session",
-    )?
-    .status;
+    )?;
 
-    if !status.success() {
-        anyhow::bail!("Failed to attach to session: {}", name);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            anyhow::bail!("Failed to attach to session: {}", name);
+        }
+
+        anyhow::bail!("Failed to attach to session '{}': {}", name, stderr);
     }
 
     Ok(())
@@ -262,6 +267,17 @@ pub fn handoff_project_windows(project: &Project, target_session: &str) -> Resul
     let sessions = running_project_sessions(&project.name)?;
     if sessions.is_empty() {
         return Ok(());
+    }
+
+    if !sessions
+        .iter()
+        .any(|session_name| session_name == target_session)
+    {
+        anyhow::bail!(
+            "Target session '{}' is not running for project '{}'",
+            target_session,
+            project.name
+        );
     }
 
     let mut client = ControlClient::connect(None)?;
@@ -688,8 +704,14 @@ fn kill_session_with_timeout(name: &str, timeout: Duration) -> Result<()> {
 pub fn connect_to_session(name: &str) -> Result<()> {
     if inside_tmux() {
         switch_client(name)
-    } else {
+    } else if stdout().is_terminal() {
         attach_session(name)
+    } else {
+        eprintln!(
+            "Session '{}' is ready, but twig cannot attach because stdout is not a terminal. Run `tmux attach-session -t {}` from an interactive terminal.",
+            name, name
+        );
+        Ok(())
     }
 }
 

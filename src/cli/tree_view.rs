@@ -296,6 +296,15 @@ impl<'a> TreeViewApp<'a> {
                 }
             }
 
+            // Activate handoff windows on selected session
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                if self.mode == TreeViewMode::Start {
+                    if let Some(action) = self.get_selected_action() {
+                        return Some(HandleResult::ActivateSession(action));
+                    }
+                }
+            }
+
             // Fork worktree
             KeyCode::Char('f') | KeyCode::Char('F') => {
                 if let Some(project) = self.get_selected_project() {
@@ -574,6 +583,14 @@ impl<'a> TreeViewApp<'a> {
             Span::styled("top ", Style::default().fg(Color::Gray)),
         ];
 
+        if self.mode == TreeViewMode::Start {
+            spans.extend([
+                Span::styled("\u{2502} ", Style::default().fg(separator_color)),
+                Span::styled("a", Style::default().fg(Color::LightCyan)),
+                Span::styled("ctivate ", Style::default().fg(Color::Gray)),
+            ]);
+        }
+
         // Show worktree-specific shortcuts only when on a worktree
         if is_worktree {
             spans.extend([
@@ -706,6 +723,8 @@ enum HandleResult {
     },
     /// Kill session - handled internally with confirmation modal
     KillSession(SelectedAction),
+    /// Activate handoff windows on selected session
+    ActivateSession(SelectedAction),
 }
 
 /// Build tree items from project data
@@ -1083,6 +1102,17 @@ fn run_event_loop(
                             HandleResult::KillSession(action) => {
                                 handle_kill_session(terminal, app, action)?;
                             }
+                            HandleResult::ActivateSession(action) => {
+                                match activate_session_for_action(action) {
+                                    Ok(message) => {
+                                        app.status_message = Some(StatusMessage::info(message));
+                                    }
+                                    Err(err) => {
+                                        app.status_message =
+                                            Some(StatusMessage::error(err.to_string()));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1102,13 +1132,11 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
         SelectedAction::StartProject(name) => {
             let project = Project::load(&name)?;
             if tmux::session_exists(&project.name)? {
-                tmux::handoff_project_windows(&project, &project.name)?;
                 return Ok(project.name);
             }
 
             project.clone_if_needed()?;
             SessionBuilder::new(&project).start_with_control()?;
-            tmux::handoff_project_windows(&project, &project.name)?;
             Ok(project.name)
         }
         SelectedAction::StartWorktree { project, branch } => {
@@ -1116,7 +1144,6 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
             let session_name = config.worktree_session_name(&branch);
 
             if tmux::session_exists(&session_name)? {
-                tmux::handoff_project_windows(&config, &session_name)?;
                 return Ok(session_name);
             }
 
@@ -1132,12 +1159,35 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
                 .with_worktree(branch)
                 .start_with_control()?;
 
-            tmux::handoff_project_windows(&config, &session_name)?;
-
             Ok(session_name)
         }
         SelectedAction::KillProject(name) => Ok(name),
         SelectedAction::KillWorktree { project, branch } => Ok(format!("{}__{}", project, branch)),
+    }
+}
+
+fn activate_session_for_action(action: SelectedAction) -> Result<String> {
+    match action {
+        SelectedAction::StartProject(name) => {
+            let project = Project::load(&name)?;
+            if !tmux::session_exists(&project.name)? {
+                anyhow::bail!("Session '{}' is not running", project.name);
+            }
+
+            tmux::handoff_project_windows(&project, &project.name)?;
+            Ok(format!("Activated windows for '{}'", project.name))
+        }
+        SelectedAction::StartWorktree { project, branch } => {
+            let config = Project::load(&project)?;
+            let session_name = config.worktree_session_name(&branch);
+            if !tmux::session_exists(&session_name)? {
+                anyhow::bail!("Session '{}' is not running", session_name);
+            }
+
+            tmux::handoff_project_windows(&config, &session_name)?;
+            Ok(format!("Activated windows for '{}'", session_name))
+        }
+        _ => anyhow::bail!("Select a project or worktree to activate"),
     }
 }
 
@@ -1209,7 +1259,6 @@ fn handle_fork_worktree(
 
     // Check if session already exists (unlikely but possible)
     if tmux::session_exists(&session_name)? {
-        tmux::handoff_project_windows(&project, &session_name)?;
         app.status_message = Some(StatusMessage::info(format!(
             "Session '{}' already exists",
             session_name
@@ -1233,8 +1282,6 @@ fn handle_fork_worktree(
         )));
         return Ok(None);
     }
-
-    tmux::handoff_project_windows(&project, &session_name)?;
 
     // Return action to start the worktree session
     Ok(Some(SelectedAction::StartWorktree {

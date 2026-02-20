@@ -41,7 +41,6 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
 
     if tmux::session_exists(&session_name)? {
         println!("Session '{}' already exists, attaching...", session_name);
-        tmux::handoff_project_windows(&project, &session_name)?;
         tmux::connect_to_session(&session_name)?;
         return Ok(());
     }
@@ -55,8 +54,6 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
 
     // Create session, run post-create, then setup windows via control mode
     builder.start_with_control()?;
-
-    tmux::handoff_project_windows(&project, &session_name)?;
 
     tmux::connect_to_session(&session_name)?;
 
@@ -86,7 +83,6 @@ fn start_project_session(name: &str) -> Result<()> {
 
     if tmux::session_exists(&project.name)? {
         println!("Session '{}' already exists, attaching...", project.name);
-        tmux::handoff_project_windows(&project, &project.name)?;
         tmux::connect_to_session(&project.name)?;
         return Ok(());
     }
@@ -95,7 +91,6 @@ fn start_project_session(name: &str) -> Result<()> {
 
     println!("Starting session '{}'...", project.name);
     SessionBuilder::new(&project).start_with_control()?;
-    tmux::handoff_project_windows(&project, &project.name)?;
     tmux::connect_to_session(&project.name)?;
 
     Ok(())
@@ -108,7 +103,6 @@ fn start_worktree_session(project_name: &str, branch: &str) -> Result<()> {
 
     if tmux::session_exists(&session_name)? {
         println!("Session '{}' already exists, attaching...", session_name);
-        tmux::handoff_project_windows(&project, &session_name)?;
         tmux::connect_to_session(&session_name)?;
         return Ok(());
     }
@@ -126,8 +120,6 @@ fn start_worktree_session(project_name: &str, branch: &str) -> Result<()> {
         .with_root(worktree.path.to_string_lossy().to_string())
         .with_worktree(branch.to_string())
         .start_with_control()?;
-
-    tmux::handoff_project_windows(&project, &session_name)?;
 
     tmux::connect_to_session(&session_name)?;
 
