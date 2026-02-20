@@ -71,6 +71,10 @@ twig run --project=dotfiles --window=6 --pane=1 -- whoami
 # Run a command in a worktree session
 twig run --project=dotfiles --tree=feature-x --window=1 -- btop
 
+# Activate handoff windows for a target session/worktree
+twig window activate --project=myproject
+twig window activate --project=myproject --tree=feature-auth
+
 # Worktree commands
 twig tree create [project] [branch]   # Create worktree + session
 twig tree list [project]              # List worktrees
@@ -149,8 +153,9 @@ worktree:
     - yarn install
     - rails db:migrate
 
-  # Optional: pause commands in these windows when switching between
-  # any session for this project (including main and worktrees).
+  # Optional: windows managed by handoff activation.
+  # Run `twig window activate` to pause these windows in other sessions
+  # for this project and start them in the target session.
   handoff_windows:
     - rails
 
@@ -191,8 +196,9 @@ worktree:
     - yarn install
     - bin/rails db:prepare
 
-  # Optional: pause commands in these windows when switching between
-  # any session for this project (including main and worktrees).
+  # Optional: windows managed by handoff activation.
+  # Run `twig window activate` to pause these windows in other sessions
+  # for this project and start them in the target session.
   handoff_windows:
     - rails
 ```
@@ -259,6 +265,32 @@ When you run `twig tree create <project> <branch>`:
 Session naming: `myproject__feature-auth` (double underscore separator)
 
 Worktree path: `~/Work/.trees/myproject/feature-auth`
+
+### Handoff Activation
+
+`handoff_windows` only applies when you explicitly activate a target session.
+
+Use:
+
+```bash
+# Activate handoff for the main project session
+twig window activate --project myproject
+
+# Activate handoff for a worktree session
+twig window activate --project myproject --tree feature-auth
+```
+
+What activation does:
+
+1. Finds windows listed in `worktree.handoff_windows`
+2. Sends stop signals to matching windows in other project sessions
+3. Starts matching windows in the activated target session
+
+Tips:
+
+- Keep the same window names across main/worktree configs (for example `rails`, `sidekiq`)
+- Run activation after switching context (main -> worktree or worktree -> main)
+- In the tree view (`twig tree list`), use the Activate action to do this interactively
 
 When you run `twig tree delete <project> <branch>`:
 
