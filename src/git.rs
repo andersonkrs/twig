@@ -33,6 +33,12 @@ pub fn create_worktree(project: &Project, branch: &str) -> Result<PathBuf> {
     // Check if branch exists locally or remotely
     let branch_exists = check_branch_exists(&project_root, branch)?;
 
+    // For new branches, fetch origin and base off the default branch
+    // so the worktree always starts clean from origin's latest state
+    if !branch_exists {
+        fetch_origin(&project_root)?;
+    }
+
     // Create the worktree (suppress output to avoid breaking TUI)
     let mut cmd = Command::new("git");
     cmd.current_dir(&project_root);
@@ -42,8 +48,13 @@ pub fn create_worktree(project: &Project, branch: &str) -> Result<PathBuf> {
         // Checkout existing branch
         cmd.arg(&worktree_path).arg(branch);
     } else {
-        // Create new branch from current HEAD
-        cmd.arg("-b").arg(branch).arg(&worktree_path);
+        // Create new branch from origin's default branch
+        let default_branch = get_default_branch(&project_root)?;
+        let start_point = format!("origin/{}", default_branch);
+        cmd.arg("-b")
+            .arg(branch)
+            .arg(&worktree_path)
+            .arg(&start_point);
     }
 
     let output = cmd
@@ -267,6 +278,24 @@ pub fn list_worktrees(project: &Project) -> Result<Vec<WorktreeInfo>> {
 pub struct WorktreeInfo {
     pub path: PathBuf,
     pub branch: String,
+}
+
+/// Fetch latest state from origin
+fn fetch_origin(repo_path: &Path) -> Result<()> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["fetch", "origin"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("Failed to fetch from origin")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git fetch origin failed: {}", stderr.trim());
+    }
+
+    Ok(())
 }
 
 /// Check if a branch exists (locally or remotely)

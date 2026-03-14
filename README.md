@@ -257,7 +257,7 @@ When you run `twig start <project>`:
 When you run `twig tree create <project> <branch>`:
 
 1. Creates git worktree at `{worktree_base}/{project}/{branch}`
-2. Creates the branch if it doesn't exist
+2. If the branch doesn't exist, fetches origin and creates it from `origin/<default_branch>` so it always starts clean
 3. Copies and symlinks configured files from parent project
 4. Runs post-create commands
 5. Starts a tmux session named `{project}__{branch}`
