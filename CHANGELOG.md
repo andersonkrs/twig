@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/andersonkrs/twig/compare/v0.1.5...v0.1.6) - 2026-05-04
+
+### Added
+
+- *(git)* read all worktrees from all folders instead of just the default
+
+### Other
+
+- bump release
+
 ## [0.1.5](https://github.com/andersonkrs/twig/compare/v0.1.4...v0.1.5) - 2026-03-14
 
 ### Added
