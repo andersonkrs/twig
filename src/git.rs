@@ -155,46 +155,67 @@ pub fn create_worktree_from_pr(project: &Project, pr_number: u64) -> Result<Work
 
 /// Delete a git worktree and its local branch
 pub fn delete_worktree(project: &Project, branch: &str) -> Result<()> {
-    let config = GlobalConfig::load()?;
     let project_root = project.root_expanded();
 
-    let branch_safe = branch.replace('/', "-");
-    let worktree_path = config
-        .worktree_base_expanded()
-        .join(&project.name)
-        .join(&branch_safe);
+    // Look up the actual worktree path from git so we handle worktrees
+    // that live outside the computed {worktree_base}/{project} directory.
+    let worktrees = list_worktrees(project)?;
+    let worktree_path = worktrees
+        .iter()
+        .find(|wt| wt.branch == branch)
+        .map(|wt| wt.path.clone());
 
-    if !worktree_path.exists() {
-        anyhow::bail!("Worktree does not exist at {:?}", worktree_path);
+    if let Some(worktree_path) = worktree_path {
+        if worktree_path.exists() {
+            // Remove the worktree (suppress output to avoid breaking TUI)
+            let output = Command::new("git")
+                .current_dir(&project_root)
+                .args(["worktree", "remove", "--force"])
+                .arg(&worktree_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .context("Failed to remove git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                // Try force removal of the directory
+                fs::remove_dir_all(&worktree_path)
+                    .with_context(|| {
+                        format!(
+                            "Failed to remove worktree directory: {:?}\n\ngit worktree remove stderr: {}",
+                            worktree_path,
+                            stderr.trim()
+                        )
+                    })?;
+
+                // Prune worktree references
+                Command::new("git")
+                    .current_dir(&project_root)
+                    .args(["worktree", "prune"])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .ok();
+            }
+        } else {
+            // Worktree is registered but directory is gone — prune it
+            Command::new("git")
+                .current_dir(&project_root)
+                .args(["worktree", "prune"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .ok();
+        }
     }
 
-    // Remove the worktree (suppress output to avoid breaking TUI)
-    let output = Command::new("git")
-        .current_dir(&project_root)
-        .args(["worktree", "remove", "--force"])
-        .arg(&worktree_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .context("Failed to remove git worktree")?;
-
-    if !output.status.success() {
-        // Try force removal of the directory
-        fs::remove_dir_all(&worktree_path)
-            .with_context(|| format!("Failed to remove worktree directory: {:?}", worktree_path))?;
-
-        // Prune worktree references
-        Command::new("git")
-            .current_dir(&project_root)
-            .args(["worktree", "prune"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .ok();
+    // Delete the local branch, but never delete the repo's default branch
+    let default_branch = get_default_branch(&project_root)?;
+    if branch != default_branch {
+        delete_local_branch(&project_root, branch)?;
     }
-
-    // Delete the local branch
-    delete_local_branch(&project_root, branch)?;
 
     Ok(())
 }
@@ -225,8 +246,9 @@ fn delete_local_branch(repo_path: &Path, branch: &str) -> Result<()> {
 
 /// List worktrees for a project
 pub fn list_worktrees(project: &Project) -> Result<Vec<WorktreeInfo>> {
-    let config = GlobalConfig::load()?;
     let project_root = project.root_expanded();
+    let project_root_canon =
+        std::fs::canonicalize(&project_root).unwrap_or_else(|_| project_root.clone());
 
     let output = Command::new("git")
         .current_dir(&project_root)
@@ -243,15 +265,17 @@ pub fn list_worktrees(project: &Project) -> Result<Vec<WorktreeInfo>> {
     let mut current_path: Option<PathBuf> = None;
     let mut current_branch: Option<String> = None;
 
-    let worktree_base = config.worktree_base_expanded().join(&project.name);
-
     for line in stdout.lines() {
         if line.starts_with("worktree ") {
             // Save previous worktree if any
             if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
-                // Only include worktrees under our worktree_base
-                if path.starts_with(&worktree_base) {
-                    worktrees.push(WorktreeInfo { path, branch });
+                let path_canon = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                // Exclude the main repository worktree
+                if path_canon != project_root_canon {
+                    worktrees.push(WorktreeInfo {
+                        path: path_canon,
+                        branch,
+                    });
                 }
             }
 
@@ -266,8 +290,13 @@ pub fn list_worktrees(project: &Project) -> Result<Vec<WorktreeInfo>> {
 
     // Don't forget the last one
     if let (Some(path), Some(branch)) = (current_path, current_branch) {
-        if path.starts_with(&worktree_base) {
-            worktrees.push(WorktreeInfo { path, branch });
+        let path_canon = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        // Exclude the main repository worktree
+        if path_canon != project_root_canon {
+            worktrees.push(WorktreeInfo {
+                path: path_canon,
+                branch,
+            });
         }
     }
 
