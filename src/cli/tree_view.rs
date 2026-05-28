@@ -774,7 +774,7 @@ fn build_tree_items<'a>(
             .worktrees
             .iter()
             .map(|wt| {
-                let session_name = format!("{}__{}", project.name, wt.branch);
+                let session_name = format!("{}__{}", project.name, wt.branch.replace('/', "-"));
                 let is_running = running_sessions.contains(&session_name);
                 let is_current_wt = current.is_current_worktree(&project.name, &wt.branch);
 
@@ -919,7 +919,7 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
                 worktrees
                     .into_iter()
                     .filter(|wt| {
-                        let session_name = format!("{}__{}", name, wt.branch);
+                        let session_name = format!("{}__{}", name, wt.branch.replace('/', "-"));
                         running_sessions.contains(&session_name)
                     })
                     .collect()

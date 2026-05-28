@@ -13,22 +13,41 @@ pub struct ControlClient {
 
 impl ControlClient {
     pub fn connect(server: Option<&str>) -> Result<Self> {
+        Self::spawn(server, true)
+    }
+
+    #[cfg(test)]
+    pub fn connect_new_session(server: Option<&str>) -> Result<Self> {
+        Self::spawn(server, false)
+    }
+
+    fn spawn(server: Option<&str>, attach: bool) -> Result<Self> {
         let mut command = Command::new("tmux");
         if let Some(socket) = server {
             command.args(["-L", socket]);
         }
 
-        let debug_args = match server {
-            Some(socket) => vec!["tmux", "-L", socket, "-C"],
-            None => vec!["tmux", "-C"],
+        let attach_arg = if attach { "attach-session" } else { "" };
+
+        let debug_args = match (server, attach) {
+            (Some(socket), true) => {
+                vec!["tmux", "-L", socket, "-C", "attach-session"]
+            }
+            (Some(socket), false) => vec!["tmux", "-L", socket, "-C"],
+            (None, true) => vec!["tmux", "-C", "attach-session"],
+            (None, false) => vec!["tmux", "-C"],
         };
         debug_log::log_tmux_control(
             "launch",
             &format!("{} {}", debug_args[0], debug_args[1..].join(" ")),
         );
 
+        command.arg("-C");
+        if attach {
+            command.arg(attach_arg);
+        }
+
         let mut child = command
-            .arg("-C")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -52,16 +71,13 @@ impl ControlClient {
     }
 
     pub fn connect_with_socket_path(socket_path: &str) -> Result<Self> {
-        let mut command = Command::new("tmux");
-        command.args(["-S", socket_path]);
-
         debug_log::log_tmux_control(
             "launch",
-            &format!("tmux -S {} -C", quote_tmux_arg(socket_path)),
+            &format!("tmux -S {} -C attach-session", quote_tmux_arg(socket_path)),
         );
 
-        let mut child = command
-            .arg("-C")
+        let mut child = Command::new("tmux")
+            .args(["-S", socket_path, "-C", "attach-session"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -247,6 +263,7 @@ impl ControlClient {
         Ok(output)
     }
 
+    #[allow(dead_code)]
     pub fn new_session(
         &mut self,
         session: &str,
@@ -472,7 +489,7 @@ mod tests {
         let session = "twig_test_session";
         let window = "extra";
 
-        let mut client = match ControlClient::connect(Some(&server)) {
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
             Ok(client) => client,
             Err(err) => {
                 eprintln!("tmux control client unavailable: {err}");
@@ -536,7 +553,7 @@ mod tests {
         let _guard = ServerGuard::new(server.clone());
         let session = "twig_test_session";
 
-        let mut client = match ControlClient::connect(Some(&server)) {
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
             Ok(client) => client,
             Err(err) => {
                 eprintln!("tmux control client unavailable: {err}");
@@ -625,7 +642,7 @@ mod tests {
         let _guard = ServerGuard::new(server.clone());
         let session = "twig_test_session";
 
-        let mut client = match ControlClient::connect(Some(&server)) {
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
             Ok(client) => client,
             Err(err) => {
                 eprintln!("tmux control client unavailable: {err}");
@@ -664,7 +681,7 @@ mod tests {
         let _guard = ServerGuard::new(server.clone());
         let session = "twig_test_session";
 
-        let mut client = match ControlClient::connect(Some(&server)) {
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
             Ok(client) => client,
             Err(err) => {
                 eprintln!("tmux control client unavailable: {err}");

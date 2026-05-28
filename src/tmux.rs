@@ -558,29 +558,61 @@ impl SessionBuilder {
     }
 
     /// Start the tmux session using tmux control mode.
-    /// Creates session, runs post-create commands sequentially, then sets up windows.
+    /// Creates session via direct command, then uses control mode for post-create
+    /// commands and window setup.
     pub fn start_with_control(&self) -> Result<()> {
+        self.create_session_direct()?;
         let mut client = ControlClient::connect(None)?;
-        self.create_session_with_control(&mut client)?;
+        self.set_session_environment(&mut client)?;
         self.run_post_create_with_control(&mut client)?;
         self.setup_windows_with_control(&mut client)?;
         Ok(())
     }
 
-    pub fn create_session_with_control(&self, client: &mut ControlClient) -> Result<()> {
-        let root_expanded = PathBuf::from(shellexpand::tilde(&self.root).to_string());
-        let mut env = vec![("TWIG_PROJECT", self.project_name.as_str())];
-        if let Some(branch) = self.worktree_branch.as_deref() {
-            env.push(("TWIG_WORKTREE", branch));
+    fn create_session_direct(&self) -> Result<()> {
+        let root_expanded = shellexpand::tilde(&self.root).to_string();
+        let mut args = vec![
+            "new-session",
+            "-d",
+            "-s",
+            &self.session_name,
+            "-n",
+            SETUP_WINDOW_NAME,
+            "-c",
+            &root_expanded,
+        ];
+
+        let twig_project_env = format!("TWIG_PROJECT={}", self.project_name);
+        args.push("-e");
+        args.push(&twig_project_env);
+
+        let twig_worktree_env = self
+            .worktree_branch
+            .as_ref()
+            .map(|b| format!("TWIG_WORKTREE={}", b));
+        if let Some(ref env) = twig_worktree_env {
+            args.push("-e");
+            args.push(env);
         }
 
-        client.new_session(&self.session_name, SETUP_WINDOW_NAME, &root_expanded, &env)?;
+        let output = run_tmux_command(&args, "Failed to create tmux session")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "Failed to create session '{}': {}",
+                self.session_name,
+                stderr.trim()
+            );
+        }
 
+        Ok(())
+    }
+
+    fn set_session_environment(&self, client: &mut ControlClient) -> Result<()> {
         client.set_environment(&self.session_name, "TWIG_PROJECT", &self.project_name)?;
         if let Some(branch) = &self.worktree_branch {
             client.set_environment(&self.session_name, "TWIG_WORKTREE", branch)?;
         }
-
         Ok(())
     }
 
