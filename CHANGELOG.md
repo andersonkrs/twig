@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/andersonkrs/twig/compare/v0.2.0...v0.2.1) - 2026-05-29
+
+### Fixed
+
+- *(tree-view)* route search Enter through begin_start_session
+
 ## [0.1.6](https://github.com/andersonkrs/twig/compare/v0.1.5...v0.1.6) - 2026-05-04
 
 ### Added
