@@ -432,6 +432,10 @@ impl<'a> TreeViewApp<'a> {
                     self.search_mode = false;
                     self.query.clear();
                     self.no_match = false;
+                    if self.mode == TreeViewMode::Start {
+                        self.begin_start_session(action);
+                        return None;
+                    }
                     return Some(HandleResult::Action(action));
                 }
             }
@@ -1028,7 +1032,7 @@ fn run_with_options(
                         Ok(None)
                     }
                     SelectedAction::StartWorktree { project, branch } => {
-                        let session_name = format!("{}__{}", project, branch);
+                        let session_name = format!("{}__{}", project, branch.replace('/', "-"));
                         tmux::connect_to_session(&session_name)?;
                         Ok(None)
                     }
@@ -1162,7 +1166,9 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
             Ok(session_name)
         }
         SelectedAction::KillProject(name) => Ok(name),
-        SelectedAction::KillWorktree { project, branch } => Ok(format!("{}__{}", project, branch)),
+        SelectedAction::KillWorktree { project, branch } => {
+            Ok(format!("{}__{}", project, branch.replace('/', "-")))
+        }
     }
 }
 
