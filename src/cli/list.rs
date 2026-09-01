@@ -20,7 +20,7 @@ pub fn run(focus_current: bool) -> Result<()> {
             let session_name = format!("{}__{}", project, branch);
             kill::run(Some(session_name))
         }
-        None => Ok(()), // User quit
+        Some(SelectedAction::KillOrphaned { .. }) | None => Ok(()), // Not reachable from Start mode / user quit
     }
 }
 

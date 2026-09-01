@@ -270,13 +270,37 @@ fn is_project_session(project_name: &str, session_name: &str) -> bool {
 }
 
 /// List running worktree sessions for a project.
-#[allow(dead_code)]
 pub fn running_worktree_sessions_for_project(project_name: &str) -> Result<Vec<String>> {
     let sessions = list_sessions()?;
 
     Ok(sessions
         .into_iter()
         .filter(|session_name| is_worktree_session_for_project(session_name, project_name))
+        .collect())
+}
+
+/// List running worktree sessions for a project whose worktree no longer exists
+/// (e.g. the worktree was deleted with `git worktree remove` while its tmux
+/// session was still running).
+pub fn orphaned_worktree_sessions_for_project(
+    project_name: &str,
+    live_branches: &[String],
+) -> Result<Vec<String>> {
+    let live_sessions: Vec<String> = live_branches
+        .iter()
+        .map(|branch| {
+            format!(
+                "{project_name}{WORKTREE_SESSION_PREFIX}{}",
+                branch.replace('/', "-")
+            )
+        })
+        .collect();
+
+    let sessions = running_worktree_sessions_for_project(project_name)?;
+
+    Ok(sessions
+        .into_iter()
+        .filter(|session_name| !live_sessions.contains(session_name))
         .collect())
 }
 

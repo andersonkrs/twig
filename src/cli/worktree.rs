@@ -73,7 +73,7 @@ pub fn list(project_name: Option<String>) -> Result<()> {
             let session_name = format!("{}__{}", project, branch);
             kill::run(Some(session_name))
         }
-        None => Ok(()), // User quit
+        Some(SelectedAction::KillOrphaned { .. }) | None => Ok(()), // Not reachable from Start mode / user quit
     }
 }
 

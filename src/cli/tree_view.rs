@@ -55,15 +55,30 @@ pub enum TreeNodeId {
         project: String,
         branch: String,
     },
+    /// A running session whose worktree no longer exists
+    Orphaned {
+        project: String,
+        session_name: String,
+    },
 }
 
 /// Action to perform after tree view exits
 #[derive(Debug, Clone)]
 pub enum SelectedAction {
     StartProject(String),
-    StartWorktree { project: String, branch: String },
+    StartWorktree {
+        project: String,
+        branch: String,
+    },
     KillProject(String),
-    KillWorktree { project: String, branch: String },
+    KillWorktree {
+        project: String,
+        branch: String,
+    },
+    KillOrphaned {
+        project: String,
+        session_name: String,
+    },
 }
 
 /// Search candidate for fuzzy matching
@@ -81,6 +96,7 @@ struct ProjectData {
     name: String,
     worktrees: Vec<WorktreeInfo>,
     session_running: bool,
+    orphaned_sessions: Vec<String>,
 }
 
 /// Mode for the tree view
@@ -291,6 +307,13 @@ impl<'a> TreeViewApp<'a> {
                         | SelectedAction::KillWorktree { project, branch } => {
                             SelectedAction::KillWorktree { project, branch }
                         }
+                        SelectedAction::KillOrphaned {
+                            project,
+                            session_name,
+                        } => SelectedAction::KillOrphaned {
+                            project,
+                            session_name,
+                        },
                     };
                     return Some(HandleResult::KillSession(kill_action));
                 }
@@ -348,6 +371,9 @@ impl<'a> TreeViewApp<'a> {
 
             // Selection
             KeyCode::Enter => {
+                if let Some(session_name) = self.get_selected_orphaned_session() {
+                    return Some(HandleResult::AttachOrphaned(session_name));
+                }
                 if let Some(action) = self.get_selected_action() {
                     if self.mode == TreeViewMode::Start {
                         self.begin_start_session(action);
@@ -529,6 +555,16 @@ impl<'a> TreeViewApp<'a> {
                     branch: branch.clone(),
                 }),
             },
+            TreeNodeId::Orphaned {
+                project,
+                session_name,
+            } => match self.mode {
+                TreeViewMode::Start => None,
+                TreeViewMode::Kill => Some(SelectedAction::KillOrphaned {
+                    project: project.clone(),
+                    session_name: session_name.clone(),
+                }),
+            },
         }
     }
 
@@ -543,6 +579,7 @@ impl<'a> TreeViewApp<'a> {
             TreeNodeId::Root => None,
             TreeNodeId::Project(name) => Some(name.clone()),
             TreeNodeId::Worktree { project, .. } => Some(project.clone()),
+            TreeNodeId::Orphaned { project, .. } => Some(project.clone()),
         }
     }
 
@@ -555,6 +592,19 @@ impl<'a> TreeViewApp<'a> {
 
         match &selected[selected.len() - 1] {
             TreeNodeId::Worktree { project, branch } => Some((project.clone(), branch.clone())),
+            _ => None,
+        }
+    }
+
+    /// Get the session name if current selection is an orphaned session
+    fn get_selected_orphaned_session(&self) -> Option<String> {
+        let selected = self.tree_state.selected();
+        if selected.is_empty() {
+            return None;
+        }
+
+        match &selected[selected.len() - 1] {
+            TreeNodeId::Orphaned { session_name, .. } => Some(session_name.clone()),
             _ => None,
         }
     }
@@ -729,6 +779,8 @@ enum HandleResult {
     KillSession(SelectedAction),
     /// Activate handoff windows on selected session
     ActivateSession(SelectedAction),
+    /// Attach directly to an orphaned session (exits tree view)
+    AttachOrphaned(String),
 }
 
 /// Build tree items from project data
@@ -822,6 +874,25 @@ fn build_tree_items<'a>(
                     wt_line,
                 )
             })
+            .chain(project.orphaned_sessions.iter().map(|session_name| {
+                let orphaned_line: Line = Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(
+                        "\u{2620} ", // ☠ orphaned indicator
+                        Style::default().fg(Color::Red),
+                    ),
+                    Span::styled(session_name.clone(), Style::default().fg(Color::Red).bold()),
+                    Span::styled(" (orphaned)", Style::default().fg(Color::Red).italic()),
+                ]);
+
+                TreeItem::new_leaf(
+                    TreeNodeId::Orphaned {
+                        project: project.name.clone(),
+                        session_name: session_name.clone(),
+                    },
+                    orphaned_line,
+                )
+            }))
             .collect();
 
         let item = if children.is_empty() {
@@ -913,6 +984,7 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
         };
 
         let session_running = running_sessions.contains(&name);
+        let mut orphaned_sessions = Vec::new();
 
         // Get worktrees only if requested
         let filtered_worktrees: Vec<WorktreeInfo> = if opts.include_worktrees {
@@ -920,6 +992,12 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
 
             // Filter worktrees to only running ones if running_only
             if opts.running_only {
+                let live_branches: Vec<String> =
+                    worktrees.iter().map(|wt| wt.branch.clone()).collect();
+                orphaned_sessions =
+                    tmux::orphaned_worktree_sessions_for_project(&name, &live_branches)
+                        .unwrap_or_default();
+
                 worktrees
                     .into_iter()
                     .filter(|wt| {
@@ -935,7 +1013,11 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
         };
 
         // In running_only mode, skip projects with no running sessions
-        if opts.running_only && !session_running && filtered_worktrees.is_empty() {
+        if opts.running_only
+            && !session_running
+            && filtered_worktrees.is_empty()
+            && orphaned_sessions.is_empty()
+        {
             continue;
         }
 
@@ -943,6 +1025,7 @@ fn load_project_data(opts: LoadOptions) -> Result<Vec<ProjectData>> {
             name,
             worktrees: filtered_worktrees,
             session_running,
+            orphaned_sessions,
         });
     }
 
@@ -1117,6 +1200,9 @@ fn run_event_loop(
                                     }
                                 }
                             }
+                            HandleResult::AttachOrphaned(session_name) => {
+                                return Ok(EventLoopOutcome::Attach(session_name));
+                            }
                         }
                     }
                 }
@@ -1169,6 +1255,7 @@ fn start_session_for_action(action: SelectedAction) -> Result<String> {
         SelectedAction::KillWorktree { project, branch } => {
             Ok(format!("{}__{}", project, branch.replace('/', "-")))
         }
+        SelectedAction::KillOrphaned { session_name, .. } => Ok(session_name),
     }
 }
 
@@ -1466,6 +1553,14 @@ fn handle_kill_session(
                 project.clone(),
             )
         }
+        SelectedAction::KillOrphaned {
+            project,
+            session_name,
+        } => (
+            session_name.clone(),
+            format!("{} (orphaned)", session_name),
+            project.clone(),
+        ),
         _ => return Ok(()), // Not a kill action
     };
 
@@ -1752,11 +1847,13 @@ mod tests {
                     },
                 ],
                 session_running: false,
+                orphaned_sessions: vec![],
             },
             ProjectData {
                 name: "proj-b".to_string(),
                 worktrees: vec![],
                 session_running: true,
+                orphaned_sessions: vec![],
             },
         ];
 
