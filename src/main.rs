@@ -70,6 +70,15 @@ enum Commands {
         session: Option<String>,
     },
 
+    /// Set up an existing project/worktree: create what's missing, or
+    /// re-run post-create tasks if the session is already running
+    Setup {
+        /// Project name (interactive selection if not provided)
+        project: Option<String>,
+        /// Worktree branch name (omit for the project's main session)
+        branch: Option<String>,
+    },
+
     /// Run a command in a tmux session
     #[command(alias = "r")]
     Run {
@@ -201,6 +210,7 @@ fn main() -> Result<()> {
         Commands::Edit { project } => cli::edit::run(project),
         Commands::Delete { project } => cli::delete::run(project),
         Commands::Stop { session } => cli::kill::run(session),
+        Commands::Setup { project, branch } => cli::setup::run(project, branch),
         Commands::Run {
             command,
             project,

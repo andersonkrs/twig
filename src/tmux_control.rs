@@ -353,6 +353,12 @@ impl ControlClient {
         Ok(())
     }
 
+    pub fn kill_window(&mut self, target: &str) -> Result<()> {
+        let command = format!("kill-window -t {}", quote_tmux_arg(target));
+        self.command(&command)?;
+        Ok(())
+    }
+
     pub fn rename_window(&mut self, target: &str, name: &str) -> Result<()> {
         let command = format!(
             "rename-window -t {} {}",
@@ -537,6 +543,78 @@ mod tests {
         assert!(
             windows.iter().any(|name| name == window),
             "expected window '{}' in {:?}",
+            window,
+            windows
+        );
+    }
+
+    #[test]
+    fn test_control_kill_window() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping control mode test");
+            return;
+        }
+
+        let server = unique_server_name();
+        let _guard = ServerGuard::new(server.clone());
+        let session = "twig_test_session";
+        let window = "extra";
+
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
+            Ok(client) => client,
+            Err(err) => {
+                eprintln!("tmux control client unavailable: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = client.command(&format!("new-session -d -s {}", session)) {
+            eprintln!("failed to create test session: {err}");
+            let _ = client.command("kill-server");
+            return;
+        }
+
+        if let Err(err) = client.new_window(session, window, std::path::Path::new("/")) {
+            eprintln!("failed to create test window: {err}");
+            let _ = client.command("kill-server");
+            return;
+        }
+
+        let target = format!("{}:{}", session, window);
+        if let Err(err) = client.kill_window(&target) {
+            eprintln!("failed to kill test window: {err}");
+            let _ = client.command("kill-server");
+            return;
+        }
+
+        let output = Command::new("tmux")
+            .args([
+                "-L",
+                &server,
+                "list-windows",
+                "-t",
+                session,
+                "-F",
+                "#{window_name}",
+            ])
+            .output()
+            .expect("failed to run tmux list-windows");
+
+        assert!(
+            output.status.success(),
+            "tmux list-windows failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let windows: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+
+        assert!(
+            !windows.iter().any(|name| name == window),
+            "expected window '{}' to be gone, found {:?}",
             window,
             windows
         );
