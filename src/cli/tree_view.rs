@@ -328,6 +328,15 @@ impl<'a> TreeViewApp<'a> {
                 }
             }
 
+            // Set up (or re-run post-create tasks on) selected session
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                if self.mode == TreeViewMode::Start {
+                    if let Some(action) = self.get_selected_action() {
+                        return Some(HandleResult::SetupSession(action));
+                    }
+                }
+            }
+
             // Fork worktree
             KeyCode::Char('f') | KeyCode::Char('F') => {
                 if let Some(project) = self.get_selected_project() {
@@ -781,6 +790,9 @@ enum HandleResult {
     ActivateSession(SelectedAction),
     /// Attach directly to an orphaned session (exits tree view)
     AttachOrphaned(String),
+    /// Set up selected project/worktree: create what's missing, or re-run
+    /// post-create tasks if the session is already running
+    SetupSession(SelectedAction),
 }
 
 /// Build tree items from project data
@@ -1203,6 +1215,17 @@ fn run_event_loop(
                             HandleResult::AttachOrphaned(session_name) => {
                                 return Ok(EventLoopOutcome::Attach(session_name));
                             }
+                            HandleResult::SetupSession(action) => {
+                                match setup_session_for_action(action) {
+                                    Ok(message) => {
+                                        app.status_message = Some(StatusMessage::info(message));
+                                    }
+                                    Err(err) => {
+                                        app.status_message =
+                                            Some(StatusMessage::error(err.to_string()));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1281,6 +1304,20 @@ fn activate_session_for_action(action: SelectedAction) -> Result<String> {
             Ok(format!("Activated windows for '{}'", session_name))
         }
         _ => anyhow::bail!("Select a project or worktree to activate"),
+    }
+}
+
+fn setup_session_for_action(action: SelectedAction) -> Result<String> {
+    match action {
+        SelectedAction::StartProject(name) => {
+            let project = Project::load(&name)?;
+            crate::cli::setup::ensure_setup(&project, None)
+        }
+        SelectedAction::StartWorktree { project, branch } => {
+            let config = Project::load(&project)?;
+            crate::cli::setup::ensure_setup(&config, Some(&branch))
+        }
+        _ => anyhow::bail!("Select a project or worktree to set up"),
     }
 }
 

@@ -3,6 +3,7 @@ pub mod edit;
 pub mod kill;
 pub mod list;
 pub mod new;
+pub mod setup;
 pub mod start;
 pub mod tree_view;
 pub mod window;

@@ -646,7 +646,38 @@ impl SessionBuilder {
         }
 
         let target = format!("{}:{}", self.session_name, SETUP_WINDOW_NAME);
+        self.send_commands_with_wait(client, &target)
+    }
 
+    /// Run `post_create` commands in a temporary window created in the
+    /// current (already-running) session, then remove that window.
+    /// No-op if there are no `post_create` commands configured.
+    pub fn run_post_create_in_scratch_window(&self) -> Result<()> {
+        if self.post_create_commands.is_empty() {
+            return Ok(());
+        }
+
+        let mut client = ControlClient::connect(None)?;
+        let root_expanded = PathBuf::from(shellexpand::tilde(&self.root).to_string());
+        let window_name = format!("twig-setup-{}", std::process::id());
+
+        client.new_window(&self.session_name, &window_name, &root_expanded)?;
+        let target = format!("{}:{}", self.session_name, window_name);
+
+        let result = self.send_commands_with_wait(&mut client, &target);
+
+        // Best-effort cleanup: remove the scratch window even if a command failed.
+        let _ = client.kill_window(&target);
+
+        result
+    }
+
+    /// True if this project has any `post_create` commands configured.
+    pub fn has_post_create_commands(&self) -> bool {
+        !self.post_create_commands.is_empty()
+    }
+
+    fn send_commands_with_wait(&self, client: &mut ControlClient, target: &str) -> Result<()> {
         for (index, command) in self.post_create_commands.iter().enumerate() {
             let trimmed = command.trim();
             if trimmed.is_empty() {
@@ -655,7 +686,7 @@ impl SessionBuilder {
 
             let token = unique_wait_token(&self.session_name, index);
             let signal = format!("{}; tmux wait-for -S {}", trimmed, token);
-            client.send_keys(&target, &signal, true)?;
+            client.send_keys(target, &signal, true)?;
             client.wait_for(&token)?;
         }
 
