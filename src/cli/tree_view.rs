@@ -651,6 +651,9 @@ impl<'a> TreeViewApp<'a> {
                 Span::styled("\u{2502} ", Style::default().fg(separator_color)),
                 Span::styled("a", Style::default().fg(Color::LightCyan)),
                 Span::styled("ctivate ", Style::default().fg(Color::Gray)),
+                Span::styled("\u{2502} ", Style::default().fg(separator_color)),
+                Span::styled("x", Style::default().fg(Color::LightCyan)),
+                Span::styled(" setup ", Style::default().fg(Color::Gray)),
             ]);
         }
 
