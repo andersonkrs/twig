@@ -136,13 +136,16 @@ impl ControlClient {
                 anyhow::bail!("tmux control mode exited unexpectedly");
             }
 
-            if trimmed.starts_with("%error") {
-                anyhow::bail!("tmux control error: {}", trimmed);
+            if trimmed.starts_with("%begin") {
+                if command_id.is_none() && block_from_client(trimmed) {
+                    command_id = Some(parse_command_id(trimmed)?);
+                }
+                continue;
             }
 
-            if trimmed.starts_with("%begin") {
-                if command_id.is_none() {
-                    command_id = Some(parse_command_id(trimmed)?);
+            if trimmed.starts_with("%error") {
+                if block_from_client(trimmed) {
+                    anyhow::bail!("tmux control error: {}", trimmed);
                 }
                 continue;
             }
@@ -290,7 +293,7 @@ impl ControlClient {
     pub fn set_environment(&mut self, session: &str, key: &str, value: &str) -> Result<()> {
         let command = format!(
             "set-environment -t {} {} {}",
-            quote_tmux_arg(session),
+            quote_session(session),
             quote_tmux_arg(key),
             quote_tmux_arg(value)
         );
@@ -301,7 +304,7 @@ impl ControlClient {
     pub fn new_window(&mut self, session: &str, name: &str, cwd: &std::path::Path) -> Result<()> {
         let command = format!(
             "new-window -d -t {} -n {} -c {}",
-            quote_tmux_arg(session),
+            quote_target(session),
             quote_tmux_arg(name),
             quote_tmux_arg(&cwd.to_string_lossy())
         );
@@ -325,7 +328,7 @@ impl ControlClient {
         }
         command.push_str(&format!(
             " -t {} -c {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg(&cwd.to_string_lossy())
         ));
         self.command(&command)?;
@@ -335,7 +338,7 @@ impl ControlClient {
     pub fn send_keys(&mut self, target: &str, keys: &str, enter: bool) -> Result<()> {
         let mut command = format!(
             "send-keys -t {} {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg(keys)
         );
 
@@ -348,13 +351,13 @@ impl ControlClient {
     }
 
     pub fn kill_session(&mut self, name: &str) -> Result<()> {
-        let command = format!("kill-session -t {}", quote_tmux_arg(name));
+        let command = format!("kill-session -t {}", quote_session(name));
         self.command(&command)?;
         Ok(())
     }
 
     pub fn kill_window(&mut self, target: &str) -> Result<()> {
-        let command = format!("kill-window -t {}", quote_tmux_arg(target));
+        let command = format!("kill-window -t {}", quote_target(target));
         self.command(&command)?;
         Ok(())
     }
@@ -362,7 +365,7 @@ impl ControlClient {
     pub fn rename_window(&mut self, target: &str, name: &str) -> Result<()> {
         let command = format!(
             "rename-window -t {} {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg(name)
         );
         self.command(&command)?;
@@ -370,7 +373,7 @@ impl ControlClient {
     }
 
     pub fn select_window(&mut self, target: &str) -> Result<()> {
-        let command = format!("select-window -t {}", quote_tmux_arg(target));
+        let command = format!("select-window -t {}", quote_target(target));
         self.command(&command)?;
         Ok(())
     }
@@ -378,7 +381,7 @@ impl ControlClient {
     pub fn select_layout(&mut self, target: &str, layout: &str) -> Result<()> {
         let command = format!(
             "select-layout -t {} {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg(layout)
         );
         self.command(&command)?;
@@ -386,7 +389,7 @@ impl ControlClient {
     }
 
     pub fn select_pane(&mut self, target: &str) -> Result<()> {
-        let command = format!("select-pane -t {}", quote_tmux_arg(target));
+        let command = format!("select-pane -t {}", quote_target(target));
         self.command(&command)?;
         Ok(())
     }
@@ -400,7 +403,7 @@ impl ControlClient {
     pub fn list_panes(&mut self, target: &str) -> Result<Vec<String>> {
         let command = format!(
             "list-panes -t {} -F {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg(
                 "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_pid}"
             )
@@ -411,11 +414,40 @@ impl ControlClient {
     pub fn list_windows(&mut self, target: &str) -> Result<Vec<String>> {
         let command = format!(
             "list-windows -t {} -F {}",
-            quote_tmux_arg(target),
+            quote_target(target),
             quote_tmux_arg("#{window_name}")
         );
         self.command_with_output(&command)
     }
+}
+
+/// tmux resolves `-t` targets by prefix and fuzzy match, so a bare
+/// session name can silently hit another session (`freshly` matching
+/// `freshly-discounts`). A leading `=` forces an exact session match.
+pub fn exact_session(name: &str) -> String {
+    match name.chars().next() {
+        Some('=') | Some('$') | None => name.to_string(),
+        _ => format!("={}", name),
+    }
+}
+
+/// Window and pane targets only honour `=` on the session part, and a bare
+/// `=name` is parsed as a window name, so a session-only target needs a
+/// trailing colon to select that session's current window.
+pub fn exact_target(target: &str) -> String {
+    match target.chars().next() {
+        Some('=') | Some('$') | Some('%') | Some('@') | None => target.to_string(),
+        _ if target.contains(':') => format!("={}", target),
+        _ => format!("={}:", target),
+    }
+}
+
+fn quote_session(name: &str) -> String {
+    quote_tmux_arg(&exact_session(name))
+}
+
+fn quote_target(target: &str) -> String {
+    quote_tmux_arg(&exact_target(target))
 }
 
 fn quote_tmux_arg(value: &str) -> String {
@@ -434,6 +466,17 @@ fn unique_nonce() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
+}
+
+/// `%begin`/`%end`/`%error` carry `time number flags`; flag bit 1 marks
+/// replies to commands this client sent. The block tmux emits on startup
+/// (and any block for commands issued elsewhere) has the bit clear.
+fn block_from_client(line: &str) -> bool {
+    line.split_whitespace()
+        .nth(3)
+        .and_then(|flags| flags.parse::<u64>().ok())
+        .map(|flags| flags & 1 == 1)
+        .unwrap_or(true)
 }
 
 fn parse_command_id(line: &str) -> Result<u64> {
@@ -787,6 +830,89 @@ mod tests {
             "expected session '{}' to be gone",
             session
         );
+    }
+
+    #[test]
+    fn test_kill_session_requires_exact_name() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping control mode test");
+            return;
+        }
+
+        let server = unique_server_name();
+        let _guard = ServerGuard::new(server.clone());
+
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
+            Ok(client) => client,
+            Err(err) => {
+                eprintln!("tmux control client unavailable: {err}");
+                return;
+            }
+        };
+
+        if let Err(err) = client.command("new-session -d -s freshly-discounts") {
+            eprintln!("failed to create test session: {err}");
+            return;
+        }
+
+        assert!(
+            client.kill_session("freshly").is_err(),
+            "kill-session with a prefix of another session name must fail"
+        );
+
+        let output = Command::new("tmux")
+            .args(["-L", &server, "has-session", "-t", "=freshly-discounts"])
+            .output()
+            .expect("failed to run tmux has-session");
+
+        assert!(
+            output.status.success(),
+            "expected session 'freshly-discounts' to survive kill of 'freshly'"
+        );
+    }
+
+    #[test]
+    fn test_command_reports_error_of_the_command_just_sent() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping control mode test");
+            return;
+        }
+
+        let server = unique_server_name();
+        let _guard = ServerGuard::new(server.clone());
+
+        let mut client = match ControlClient::connect_new_session(Some(&server)) {
+            Ok(client) => client,
+            Err(err) => {
+                eprintln!("tmux control client unavailable: {err}");
+                return;
+            }
+        };
+
+        let first = client.command("kill-session -t \"=twig-no-such-session\"");
+        assert!(
+            first.is_err(),
+            "first command's error must not be swallowed"
+        );
+
+        let second = client.command("list-sessions");
+        assert!(
+            second.is_ok(),
+            "next command must not inherit the earlier error"
+        );
+    }
+
+    #[test]
+    fn test_exact_target_forms() {
+        assert_eq!(exact_session("freshly"), "=freshly");
+        assert_eq!(exact_session("=freshly"), "=freshly");
+        assert_eq!(exact_session("$3"), "$3");
+        assert_eq!(exact_target("freshly"), "=freshly:");
+        assert_eq!(exact_target("freshly:editor"), "=freshly:editor");
+        assert_eq!(exact_target("freshly:editor.1"), "=freshly:editor.1");
+        assert_eq!(exact_target("=freshly:"), "=freshly:");
+        assert_eq!(exact_target("%1"), "%1");
+        assert_eq!(exact_target("@2"), "@2");
     }
 
     struct ServerGuard {

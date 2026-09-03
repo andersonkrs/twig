@@ -9,7 +9,7 @@ use anyhow::Result;
 
 use crate::config::{Project, Window};
 use crate::debug_log;
-use crate::tmux_control::ControlClient;
+use crate::tmux_control::{exact_session, ControlClient};
 
 const SETUP_WINDOW_NAME: &str = "setup-twig";
 const WORKTREE_SESSION_PREFIX: &str = "__";
@@ -37,8 +37,9 @@ fn run_tmux_command(args: &[&str], context: &str) -> Result<std::process::Output
 
 /// Check if a tmux session exists
 pub fn session_exists(name: &str) -> Result<bool> {
+    let target = exact_session(name);
     let output = run_tmux_command(
-        ["has-session", "-t", name].as_ref(),
+        ["has-session", "-t", &target].as_ref(),
         "Failed to check tmux session",
     )?;
 
@@ -47,8 +48,9 @@ pub fn session_exists(name: &str) -> Result<bool> {
 
 /// Check if a tmux session exists on a specific socket
 pub fn session_exists_with_socket(name: &str, socket_path: &str) -> Result<bool> {
+    let target = exact_session(name);
     let output = run_tmux_command(
-        ["-S", socket_path, "has-session", "-t", name].as_ref(),
+        ["-S", socket_path, "has-session", "-t", &target].as_ref(),
         "Failed to check tmux session",
     )?;
 
@@ -57,7 +59,8 @@ pub fn session_exists_with_socket(name: &str, socket_path: &str) -> Result<bool>
 
 /// Attach to an existing tmux session
 pub fn attach_session(name: &str) -> Result<()> {
-    let args = ["attach-session", "-t", name];
+    let target = exact_session(name);
+    let args = ["attach-session", "-t", target.as_str()];
     debug_log::log_tmux_command(&args);
 
     let status = match Command::new("tmux").args(args).status() {
@@ -80,7 +83,7 @@ pub fn attach_session(name: &str) -> Result<()> {
 /// Switch to a tmux session (when already inside tmux)
 pub fn switch_client(name: &str) -> Result<()> {
     let status = run_tmux_command(
-        ["switch-client", "-t", name].as_ref(),
+        ["switch-client", "-t", &exact_session(name)].as_ref(),
         "Failed to switch tmux client",
     )?
     .status;
@@ -875,6 +878,53 @@ mod tests {
             "myproject"
         ));
         assert!(!is_worktree_session_for_project("myproject", "myproject"));
+    }
+
+    #[test]
+    fn test_session_exists_with_socket_requires_exact_name() {
+        if Command::new("tmux").arg("-V").output().is_err() {
+            eprintln!("tmux not available, skipping test");
+            return;
+        }
+
+        let socket = std::env::temp_dir().join(format!(
+            "twig-test-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let socket_path = socket.to_string_lossy().to_string();
+
+        let started = Command::new("tmux")
+            .args([
+                "-S",
+                &socket_path,
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-s",
+                "freshly-discounts",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !started {
+            eprintln!("failed to start tmux test server, skipping test");
+            return;
+        }
+
+        let exact = session_exists_with_socket("freshly-discounts", &socket_path);
+        let prefix = session_exists_with_socket("freshly", &socket_path);
+
+        let _ = Command::new("tmux")
+            .args(["-S", &socket_path, "kill-server"])
+            .status();
+
+        assert!(exact.unwrap());
+        assert!(!prefix.unwrap(), "prefix of another session must not match");
     }
 
     #[test]
