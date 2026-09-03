@@ -77,8 +77,12 @@ twig window activate --project=myproject --tree=feature-auth
 
 # Worktree commands
 twig tree create [project] [branch]   # Create worktree + session
+twig tree create --no-attach ...      # Same, but do not attach to the session
 twig tree list [project]              # List worktrees
 twig tree delete [project] [branch]   # Delete worktree + kill session
+twig tree delete --yes ...            # Same, skipping the confirmation prompt
+twig tree merge [project] [branch]    # Merge worktree branch into main/master
+twig setup [project] [branch]         # Re-run post_create commands in an existing session
 ```
 
 When creating a project with a git URL, twig extracts the project name automatically:
@@ -313,6 +317,39 @@ bind-key s display-popup -E -w 80% -h 60% "twig ls --focus-current"
 
 If you want the popup to always open from anywhere (not just inside a twig session), it
 will still work but will fall back to the first project when the env vars are not set.
+
+## Claude Code Plugin (optional)
+
+The `plugin/` directory ships a [Claude Code](https://code.claude.com) plugin that makes
+Claude manage worktrees through twig instead of raw `git worktree`:
+
+- `EnterWorktree` / `ExitWorktree` are backed by `WorktreeCreate` / `WorktreeRemove` hooks that
+  run `twig tree create --no-attach` and `twig tree delete --yes`. Claude gets a worktree at
+  `{worktree_base}/{project}/{branch}` with its tmux session already running.
+- A `PreToolUse` hook blocks `git worktree ...` in Bash and points Claude at the twig
+  equivalents.
+- A `twig` skill documents the command mapping and how to resolve the project name.
+
+The hooks find the twig project by matching the repository root against the `root` of the
+files in `projects_dir`, so the repo you run Claude in must already be a twig project.
+Requires twig 0.3.2 or later and `jq`.
+
+Install from this repo as a local marketplace:
+
+```bash
+claude plugin marketplace add ~/Work/twig
+claude plugin install twig@twig-local --scope user
+```
+
+After editing files under `plugin/`, refresh the installed copy:
+
+```bash
+claude plugin marketplace update twig-local
+claude plugin uninstall twig@twig-local --scope user
+claude plugin install twig@twig-local --scope user
+```
+
+For live development without reinstalling, start Claude with `claude --plugin-dir ~/Work/twig/plugin`.
 
 ## Releases
 

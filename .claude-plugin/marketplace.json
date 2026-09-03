@@ -1,0 +1,12 @@
+{
+  "name": "twig-local",
+  "owner": { "name": "Anderson Macedo" },
+  "description": "Local twig plugin marketplace.",
+  "plugins": [
+    {
+      "name": "twig",
+      "source": "./plugin",
+      "description": "Routes git worktree operations through twig."
+    }
+  ]
+}
