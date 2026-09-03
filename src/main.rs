@@ -126,6 +126,9 @@ enum TreeCommands {
         project: Option<String>,
         /// Branch name
         branch: Option<String>,
+        /// Create the worktree and session without attaching to it
+        #[arg(long)]
+        no_attach: bool,
     },
 
     /// List worktrees for a project
@@ -142,6 +145,9 @@ enum TreeCommands {
         project: Option<String>,
         /// Branch name
         branch: Option<String>,
+        /// Skip the confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
     },
 
     /// Merge a worktree branch into main/master
@@ -220,9 +226,17 @@ fn main() -> Result<()> {
             socket,
         } => cli::window::run(project, tree, window, command, pane, socket),
         Commands::Tree { action } => match action {
-            TreeCommands::Create { project, branch } => cli::worktree::create(project, branch),
+            TreeCommands::Create {
+                project,
+                branch,
+                no_attach,
+            } => cli::worktree::create(project, branch, no_attach),
             TreeCommands::List { project } => cli::worktree::list(project),
-            TreeCommands::Delete { project, branch } => cli::worktree::delete(project, branch),
+            TreeCommands::Delete {
+                project,
+                branch,
+                yes,
+            } => cli::worktree::delete(project, branch, yes),
             TreeCommands::Merge { project, branch } => cli::worktree::merge(project, branch),
         },
         Commands::Window { action } => match action {

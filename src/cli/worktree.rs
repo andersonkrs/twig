@@ -7,7 +7,7 @@ use crate::git;
 use crate::tmux::{self, SessionBuilder};
 use crate::ui;
 
-pub fn create(project_name: Option<String>, branch: Option<String>) -> Result<()> {
+pub fn create(project_name: Option<String>, branch: Option<String>, no_attach: bool) -> Result<()> {
     let name = match project_name {
         Some(n) => n,
         None => ui::select_project("Select project for worktree...")?
@@ -20,11 +20,11 @@ pub fn create(project_name: Option<String>, branch: Option<String>) -> Result<()
             .ok_or_else(|| anyhow::anyhow!("Branch name is required"))?,
     };
 
-    create_and_start(&name, &branch_name)
+    create_and_start(&name, &branch_name, no_attach)
 }
 
 /// Create a worktree and start its tmux session
-fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
+fn create_and_start(project_name: &str, branch_name: &str, no_attach: bool) -> Result<()> {
     let project = Project::load(project_name)?;
 
     println!(
@@ -40,6 +40,10 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
     let session_name = project.worktree_session_name(branch_name);
 
     if tmux::session_exists(&session_name)? {
+        if no_attach {
+            println!("Session '{}' already exists", session_name);
+            return Ok(());
+        }
         println!("Session '{}' already exists, attaching...", session_name);
         tmux::connect_to_session(&session_name)?;
         return Ok(());
@@ -54,6 +58,10 @@ fn create_and_start(project_name: &str, branch_name: &str) -> Result<()> {
 
     // Create session, run post-create, then setup windows via control mode
     builder.start_with_control()?;
+
+    if no_attach {
+        return Ok(());
+    }
 
     tmux::connect_to_session(&session_name)?;
 
@@ -126,7 +134,7 @@ fn start_worktree_session(project_name: &str, branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn delete(project_name: Option<String>, branch: Option<String>) -> Result<()> {
+pub fn delete(project_name: Option<String>, branch: Option<String>, yes: bool) -> Result<()> {
     let name = match project_name {
         Some(n) => n,
         None => ui::select_project("Select project...")?
@@ -142,10 +150,12 @@ pub fn delete(project_name: Option<String>, branch: Option<String>) -> Result<()
     };
 
     // Confirm deletion
-    if !ui::confirm(&format!(
-        "Delete worktree '{}' for project '{}'?",
-        branch_name, name
-    ))? {
+    if !yes
+        && !ui::confirm(&format!(
+            "Delete worktree '{}' for project '{}'?",
+            branch_name, name
+        ))?
+    {
         println!("Cancelled.");
         return Ok(());
     }
