@@ -1,3 +1,12 @@
+> **Archived.** [Herdr](https://herdr.dev/) plus a few plugins now covers everything twig did for
+> me: [worktrunk](https://github.com/max-sixty/worktrunk) handles worktree create/remove and
+> bootstrap, [herdr-worktrunk](https://github.com/devashish2203/herdr-worktrunk) is the worktree
+> picker inside herdr, and [herdr-plugin-workspace-manager](https://github.com/razajamil/herdr-plugin-workspace-manager)
+> drives the per-project layouts. No more custom Rust binary to maintain.
+>
+> This was a fun experiment and a great excuse to learn Rust TUIs and poke at the tmux protocol.
+> Thanks to anyone who tried it out.
+
 # twig
 
 A tmux session manager with git worktree support, inspired by [tmuxinator](https://github.com/tmuxinator/tmuxinator).
